@@ -1,6 +1,14 @@
 # YTMusic 2.0
 
-Aplikasi Android pemutar dan pengunduh YouTube Music yang dibangun di atas WebView modern dengan dukungan pemutaran latar belakang penuh, pemblokir iklan cerdas, pengunduh audio *on-device*, serta pemutar musik offline interaktif bergaya Spotify.
+<p align="left">
+  <a href="https://github.com/bagas39/ytmusic2.0/releases"><img src="https://img.shields.io/github/v/release/bagas39/ytmusic2.0?color=007ec6&label=Release&logo=github&style=flat-square" alt="Latest Release"></a>
+  <a href="https://developer.android.com"><img src="https://img.shields.io/badge/Platform-Android%207.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Platform"></a>
+  <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Language-Kotlin-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Language"></a>
+  <a href="https://www.gnu.org/licenses/gpl-3.0"><img src="https://img.shields.io/badge/License-GPL%20v3.0-blue?style=flat-square&logo=gnu&logoColor=white" alt="License"></a>
+  <a href="https://github.com/bagas39/ytmusic2.0/releases"><img src="https://img.shields.io/github/downloads/bagas39/ytmusic2.0/total?color=orange&label=Downloads&logo=googleplay&logoColor=white&style=flat-square" alt="Downloads"></a>
+</p>
+
+Aplikasi Android pemutar dan pengunduh YouTube Music yang dibangun di atas WebView modern dengan dukungan pemutaran latar belakang penuh, pemblokir iklan cerdas tanpa kedip (*Zero-Flicker & Zero-Delay*), pengunduh audio *on-device*, serta pemutar musik offline interaktif bergaya Spotify.
 
 ---
 
@@ -8,13 +16,13 @@ Aplikasi Android pemutar dan pengunduh YouTube Music yang dibangun di atas WebVi
 
 ### 1. Pemutaran Latar Belakang (Background Playback)
 - **Anti-Freeze & Anti-Pause**: Menimpa *Page Visibility API* dan `document.hasFocus` secara otomatis agar YouTube Music tidak menjeda audio saat layar dimatikan atau saat berganti aplikasi.
-- **MediaStyle Notification **: Kontrol notifikasi lengkap di bilah status sistem Android dengan tombol navigasi interaktif (**⏮ Prev**, **⏯ Play/Pause**, **Next ⏭**).
+- **MediaStyle Notification**: Kontrol notifikasi lengkap di bilah status sistem Android dengan tombol navigasi interaktif (**⏮ Prev**, **⏯ Play/Pause**, **Next ⏭**).
 - **CPU Partial WakeLock**: Memastikan audio tetap mengalir lancar tanpa terhenti oleh mekanisme *doze mode* bawaan sistem Android.
 
-### 2. Ad-Blocker & Ad-Skip
-- **Network Level Blocking**: Mencegat request ke host server iklan (`googleads.g.doubleclick.net`, `adservice.google.com`, dll.) secara langsung di tingkat WebViewClient dengan respon *mock* CORS valid (200 OK).
-- **Fast-Forward Ad-Skip**: Jika iklan video tetap dimuat oleh player, skrip otomatis mempercepat pemutaran hingga **16x kecepatan**, membisukan (*mute*) suara, dan menekan tombol *Skip Ad* secara instan dalam hitungan milidetik.
-- **Auto-Dismiss Dialog**: Menutup otomatis popup interupsi seperti dialog *"Are you still there?"* dan promosi langganan Premium tanpa mengganggu pengguna.
+### 2. Ad-Blocker Tanpa Kedip (Zero-Flicker & Zero-Delay Ad Bypass)
+- **Network API Interception (Zero-Flicker Core)**: Mencegat request endpoint `/youtubei/v1/player` dan menghapus objek `adPlacements` serta `playerAds` dari respon JSON sebelum dibaca oleh pemutar YouTube. Player menganggap akun bebas iklan sehingga tidak pernah melakukan pergantian stream video (*stream swap*) dan kanvas bebas dari kedipan hitam.
+- **Real-Time DOM & Seekbar Fallback**: Menggunakan `MutationObserver` (0ms microtask) dan memajukan durasi seketika (`v.currentTime = v.duration`) dengan siklus `requestAnimationFrame` jika ada iklan sisa yang terdeteksi.
+- **Anti-Flicker CSS & Auto-Dismiss Dialog**: Menyembunyikan seluruh banner/overlay visual iklan (`display: none !important`) dan menutup otomatis popup interupsi seperti dialog *"Are you still there?"* serta promosi langganan Premium.
 
 ### 3. Pengunduh Audio Lokal
 - **Didukung oleh yt-dlp & FFmpeg**: Mengekstrak aliran audio terbaik langsung di perangkat dan mengonversinya ke format MP3 lengkap dengan *metadata* (judul, artis) dan cover album (*thumbnail*).
