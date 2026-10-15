@@ -31,7 +31,11 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun setupWebView() {
-        webView.setOnLongClickListener { true }
+        webView.setOnLongClickListener { v ->
+            val hit = (v as? WebView)?.hitTestResult
+            val isInput = hit?.type == WebView.HitTestResult.EDIT_TEXT_TYPE
+            !isInput
+        }
         webView.isHapticFeedbackEnabled = false
 
         val settings = webView.settings
@@ -107,6 +111,11 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                     }
                 }
                 return super.shouldInterceptRequest(view, request)
+            }
+
+            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                injectBypassScript()
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
@@ -199,8 +208,51 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                 if (!document.getElementById('ytm-no-select-style')) {
                     var s = document.createElement('style');
                     s.id = 'ytm-no-select-style';
-                    s.textContent = '* { -webkit-user-select: none !important; user-select: none !important; -webkit-touch-callout: none !important; }';
+                    s.textContent = '* { -webkit-user-select: none !important; user-select: none !important; -webkit-touch-callout: none !important; } ' +
+                                    'input, textarea, [contenteditable="true"] { -webkit-user-select: text !important; user-select: text !important; -webkit-touch-callout: default !important; } ' +
+                                    '.ad-showing video { opacity: 0 !important; } ' +
+                                    '.ad-showing .video-ads, .ad-showing .ytp-ad-module, .ytp-ad-player-overlay, .ytp-ad-overlay-container, .ytp-ad-message-container, .ytp-ad-text { display: none !important; }';
                     (document.head || document.documentElement).appendChild(s);
+                }
+            } catch (e) {}
+
+            // Intercept API /youtubei/v1/player to strip adPlacements at network layer
+            if (!window._hasPlayerFetchInterceptor) {
+                window._hasPlayerFetchInterceptor = true;
+                var origFetch = window.fetch;
+                window.fetch = async function() {
+                    var response = await origFetch.apply(this, arguments);
+                    try {
+                        var url = arguments[0];
+                        var urlStr = (typeof url === 'string') ? url : (url && url.url ? url.url : '');
+                        if (response.ok && urlStr.indexOf('/youtubei/v1/player') !== -1) {
+                            var clone = response.clone();
+                            var data = await clone.json();
+                            if (data && (data.adPlacements || data.playerAds || data.adSlots)) {
+                                delete data.adPlacements;
+                                delete data.playerAds;
+                                delete data.adSlots;
+                                var newHeaders = new Headers(response.headers);
+                                newHeaders.delete('content-encoding');
+                                newHeaders.delete('content-length');
+                                return new Response(JSON.stringify(data), {
+                                    status: response.status,
+                                    statusText: response.statusText,
+                                    headers: newHeaders
+                                });
+                            }
+                        }
+                    } catch (e) {}
+                    return response;
+                };
+            }
+
+            // Strip adPlacements from initial player response if present
+            try {
+                if (window.ytInitialPlayerResponse) {
+                    delete window.ytInitialPlayerResponse.adPlacements;
+                    delete window.ytInitialPlayerResponse.playerAds;
+                    delete window.ytInitialPlayerResponse.adSlots;
                 }
             } catch (e) {}
 
@@ -212,27 +264,98 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                 // Fake focus: YTM free-tier cek focus buat deteksi background playback
                 Object.defineProperty(document, 'hasFocus', { value: function() { return true; }, writable: true, configurable: true });
                 document.dispatchEvent(new Event('focus'));
-                window.addEventListener('blur', function(e) { e.stopImmediatePropagation(); }, true);
-                window.addEventListener('focusout', function(e) { e.stopImmediatePropagation(); }, true);
+                window.addEventListener('blur', function(e) {
+                    if (e.target === window || e.target === document) {
+                        e.stopImmediatePropagation();
+                    }
+                }, true);
+                window.addEventListener('focusout', function(e) {
+                    if (e.target === window || e.target === document) {
+                        e.stopImmediatePropagation();
+                    }
+                }, true);
                 window.addEventListener('pagehide', function(e) { e.stopImmediatePropagation(); }, true);
             } catch (e) {}
 
-            // Listener otomatis untuk langsung pindah saat lagu selesai diputar
-            var videoElem = document.querySelector('video');
-            if (videoElem && !videoElem._hasEndedListener) {
-                videoElem._hasEndedListener = true;
-                videoElem.addEventListener('ended', function() {
+            // Fast skip ad function & RAF loop
+            var _fastSkipRaf = null;
+            function skipAdsFast() {
+                var player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+                var isAd = document.querySelector('.ad-showing, .ad-interrupting, .ytp-ad-player-overlay, ytd-ad-slot-renderer, ytmusic-ad-slot-renderer') ||
+                           (player && (player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting')));
+                var v = document.querySelector('video');
+
+                if (isAd && v) {
+                    v.muted = true;
+                    v.playbackRate = 16.0;
+                    if (isFinite(v.duration) && v.duration > 0) {
+                        try {
+                            v.currentTime = v.duration;
+                        } catch (e) {}
+                    }
+                    if (player && typeof player.skipAd === 'function') {
+                        try { player.skipAd(); } catch (e) {}
+                    }
+                    var skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-skip-ad-button, .ytp-ad-skip-button-modern, .ad-skip-button, .ytp-ad-skip-button-slot button, [id^="skip-button"], .ytp-ad-overlay-close-button');
+                    if (skipBtn) {
+                        try { skipBtn.click(); } catch (e) {}
+                    }
+
+                    if (!_fastSkipRaf) {
+                        _fastSkipRaf = requestAnimationFrame(function() {
+                            _fastSkipRaf = null;
+                            skipAdsFast();
+                        });
+                    }
+                } else {
+                    if (_fastSkipRaf) {
+                        cancelAnimationFrame(_fastSkipRaf);
+                        _fastSkipRaf = null;
+                    }
+                    if (v && v.playbackRate > 1.0) {
+                        v.playbackRate = 1.0;
+                        v.muted = false;
+                    }
+                }
+            }
+
+            function setupVideoHooks(v) {
+                if (!v || v._hasFastSkipHooks) return;
+                v._hasFastSkipHooks = true;
+                v.addEventListener('ended', function() {
                     var nextBtn = document.querySelector('.next-button') || document.querySelector('#next-button');
                     if (nextBtn) { nextBtn.click(); }
                 });
+                var events = ['loadedmetadata', 'durationchange', 'canplay', 'play', 'playing', 'timeupdate'];
+                events.forEach(function(evt) {
+                    v.addEventListener(evt, skipAdsFast);
+                });
+            }
+
+            setupVideoHooks(document.querySelector('video'));
+
+            // MutationObserver untuk deteksi kelas ad-showing dan elemen iklan secara instant (0ms)
+            if (!window._ytmAdObserver) {
+                try {
+                    window._ytmAdObserver = new MutationObserver(function() {
+                        skipAdsFast();
+                    });
+                    window._ytmAdObserver.observe(document.body || document.documentElement, {
+                        childList: true,
+                        subtree: true,
+                        attributes: true,
+                        attributeFilter: ['class']
+                    });
+                } catch (e) {}
             }
 
             if (window._ytmBypassInterval) {
                 clearInterval(window._ytmBypassInterval);
             }
             window._ytmBypassInterval = setInterval(function() {
-                var skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-skip-ad-button, .ytp-ad-skip-button-modern, .ad-skip-button');
-                if (skipBtn) { skipBtn.click(); }
+                var v = document.querySelector('video');
+                setupVideoHooks(v);
+                skipAdsFast();
 
                 // "Are you still there?" -> auto-continue
                 var youThere = document.querySelector('ytmusic-you-there-renderer');
@@ -268,18 +391,7 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                     dismiss.click();
                 }
 
-                var isAdShowing = document.querySelector('.ad-showing, .ytp-ad-player-overlay');
-                var v = document.querySelector('video');
-                if (isAdShowing && v) {
-                    v.muted = true;
-                    v.playbackRate = 16.0;
-                    if (isFinite(v.duration)) { v.currentTime = v.duration; }
-                } else if (v && v.playbackRate > 1.0) {
-                    v.playbackRate = 1.0;
-                    v.muted = false;
-                }
-
-                // Laporkan status lagu untuk notifikasi Spotify-style
+                // Laporkan status lagu untuk notifikasi Spotify-style (hanya jika ada perubahan)
                 try {
                     var sTitle = '';
                     var sArtist = '';
@@ -296,11 +408,16 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                         if (aElem) sArtist = aElem.textContent.trim();
                     }
                     var isPlay = (v && !v.paused);
-                    if (sTitle && window.AndroidBridge && window.AndroidBridge.onSongState) {
-                        window.AndroidBridge.onSongState(sTitle, sArtist, isPlay);
+                    if (sTitle && (sTitle !== window._lastReportedTitle || sArtist !== window._lastReportedArtist || isPlay !== window._lastReportedPlay)) {
+                        window._lastReportedTitle = sTitle;
+                        window._lastReportedArtist = sArtist;
+                        window._lastReportedPlay = isPlay;
+                        if (window.AndroidBridge && window.AndroidBridge.onSongState) {
+                            window.AndroidBridge.onSongState(sTitle, sArtist, isPlay);
+                        }
                     }
                 } catch (e) {}
-            }, 500);
+            }, 100);
         """.trimIndent()
         executeJs(script)
     }

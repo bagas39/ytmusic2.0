@@ -60,3 +60,5 @@ desktop.ini
 *.tmp
 *.temp
 
+# Documentation Proof-of-Concept (Local only)
+poc.md

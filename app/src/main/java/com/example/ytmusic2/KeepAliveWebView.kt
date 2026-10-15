@@ -3,6 +3,7 @@ package com.example.ytmusic2
 import android.content.Context
 import android.util.AttributeSet
 import android.view.ActionMode
+import android.view.MotionEvent
 import android.view.View
 import android.webkit.WebView
 
@@ -11,6 +12,18 @@ class KeepAliveWebView @JvmOverloads constructor(
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0
 ) : WebView(context, attrs, defStyleAttr) {
+
+    init {
+        isFocusable = true
+        isFocusableInTouchMode = true
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!hasFocus()) {
+            requestFocus()
+        }
+        return super.onTouchEvent(event)
+    }
 
     override fun onWindowVisibilityChanged(visibility: Int) {
         // Paksa WebView selalu menerima status VISIBLE agar pemutaran tidak ditangguhkan
