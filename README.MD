@@ -14,10 +14,18 @@ Aplikasi Android pemutar dan pengunduh YouTube Music yang dibangun di atas WebVi
 
 ## 🚀 Fitur Utama
 
-### 1. Pemutaran Latar Belakang
-- **Anti-Freeze & Anti-Pause**: Menimpa *Page Visibility API* dan `document.hasFocus` secara otomatis agar YouTube Music tidak menjeda audio saat layar dimatikan atau saat berganti aplikasi.
-- **MediaStyle Notification**: Kontrol notifikasi lengkap di bilah status sistem Android dengan tombol navigasi interaktif (**⏮ Prev**, **⏯ Play/Pause**, **Next ⏭**).
-- **CPU Partial WakeLock**: Memastikan audio tetap mengalir lancar tanpa terhenti oleh mekanisme *doze mode* bawaan sistem Android.
+### 1. Pemutaran Latar Belakang Penuh
+- **Activity & View Lifecycle Bypass (Native Anti-Freeze)**: 
+  - **Siklus Hidup Activity**: Mengabaikan pemanggilan `webView.onPause()` dan `webView.pauseTimers()` saat Activity berada dalam status `onPause()` / `onStop()` agar eksekusi JavaScript dan pemrosesan media tidak dibekukan oleh sistem Android.
+  - **Siklus Hidup Tampilan (View Window)**: Menggunakan subclass `KeepAliveWebView` yang menimpa callback `onWindowVisibilityChanged` untuk memaksakan status `View.VISIBLE` secara permanen ke lapisan internal engine Chromium, mencegah penghentian rendering saat layar HP dimatikan.
+- **Web DOM & Focus Bypass (Client Layer)**:
+  - Memalsukan properti *Page Visibility API* (`document.hidden = false`, `document.visibilityState = 'visible'`) dan mengunci `document.hasFocus() = true`.
+  - Mencegat propagasi event `blur`, `focusout`, dan `pagehide` agar situs YouTube Music mendeteksi jendela peramban selalu berada dalam fokus interaktif.
+- **Foreground Service & CPU WakeLock (Process Immunity Layer)**:
+  - Mengikat siklus hidup audio ke `MusicBackgroundService` berstatus *Foreground Service* untuk menaikkan prioritas proses di mata sistem Android, mencegah pematian aplikasi oleh mekanisme *Low Memory Killer* (LMK).
+  - Memegang `PARTIAL_WAKE_LOCK` agar CPU perangkat tetap aktif mengalirkan data streaming audio saat HP memasuki mode hemat daya (*Doze Mode*).
+- **MediaStyle Notification (Interactive System UI)**:
+  - Kontrol pemutar terintegrasi di bilah status dan layar kunci (*lockscreen*) menggunakan `NotificationCompat.MediaStyle` lengkap dengan aksi interaktif (**⏮ Prev**, **⏯ Play/Pause**, **Next ⏭**).
 
 ### 2. Zero-Flicker & Zero-Delay Ad Bypass
 - **Network API Interception (Zero-Flicker Core)**: Mencegat request endpoint `/youtubei/v1/player` dan menghapus objek `adPlacements` serta `playerAds` dari respon JSON sebelum dibaca oleh pemutar YouTube. Player menganggap akun bebas iklan sehingga tidak pernah melakukan pergantian stream video (*stream swap*) dan kanvas bebas dari kedipan hitam.
