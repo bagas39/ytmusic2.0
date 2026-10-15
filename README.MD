@@ -8,18 +8,18 @@
   <a href="https://github.com/bagas39/ytmusic2.0/releases"><img src="https://img.shields.io/github/downloads/bagas39/ytmusic2.0/total?color=orange&label=Downloads&logo=googleplay&logoColor=white&style=flat-square" alt="Downloads"></a>
 </p>
 
-Aplikasi Android pemutar dan pengunduh YouTube Music yang dibangun di atas WebView modern dengan dukungan pemutaran latar belakang penuh, pemblokir iklan cerdas tanpa kedip (*Zero-Flicker & Zero-Delay*), pengunduh audio *on-device*, serta pemutar musik offline interaktif bergaya Spotify.
+Aplikasi Android pemutar dan pengunduh YouTube Music yang dibangun di atas WebView modern dengan dukungan pemutaran latar belakang penuh, pemblokir iklan Zero-Flicker & Zero-Delay, pengunduh audio on-device, serta pemutar musik offline interaktif.
 
 ---
 
 ## 🚀 Fitur Utama
 
-### 1. Pemutaran Latar Belakang (Background Playback)
+### 1. Pemutaran Latar Belakang
 - **Anti-Freeze & Anti-Pause**: Menimpa *Page Visibility API* dan `document.hasFocus` secara otomatis agar YouTube Music tidak menjeda audio saat layar dimatikan atau saat berganti aplikasi.
 - **MediaStyle Notification**: Kontrol notifikasi lengkap di bilah status sistem Android dengan tombol navigasi interaktif (**⏮ Prev**, **⏯ Play/Pause**, **Next ⏭**).
 - **CPU Partial WakeLock**: Memastikan audio tetap mengalir lancar tanpa terhenti oleh mekanisme *doze mode* bawaan sistem Android.
 
-### 2. Ad-Blocker Tanpa Kedip (Zero-Flicker & Zero-Delay Ad Bypass)
+### 2. Zero-Flicker & Zero-Delay Ad Bypass
 - **Network API Interception (Zero-Flicker Core)**: Mencegat request endpoint `/youtubei/v1/player` dan menghapus objek `adPlacements` serta `playerAds` dari respon JSON sebelum dibaca oleh pemutar YouTube. Player menganggap akun bebas iklan sehingga tidak pernah melakukan pergantian stream video (*stream swap*) dan kanvas bebas dari kedipan hitam.
 - **Real-Time DOM & Seekbar Fallback**: Menggunakan `MutationObserver` (0ms microtask) dan memajukan durasi seketika (`v.currentTime = v.duration`) dengan siklus `requestAnimationFrame` jika ada iklan sisa yang terdeteksi.
 - **Anti-Flicker CSS & Auto-Dismiss Dialog**: Menyembunyikan seluruh banner/overlay visual iklan (`display: none !important`) dan menutup otomatis popup interupsi seperti dialog *"Are you still there?"* serta promosi langganan Premium.
@@ -52,11 +52,11 @@ app/src/main/java/com/example/ytmusic2/
 ├── MusicBackgroundService.kt            # Foreground Service pemutar audio & MediaStyle notification
 │
 ├── coordinator/
-│   └── AppCoordinator.kt                # Orkestrator (Menghubungkan Web, Player, Downloader, UI, dan Service)
+│   └── AppCoordinator.kt                # Orkestrator untuk menghubungkan Web, Player, Downloader, UI, dan Service
 │
 ├── ui/
 │   ├── view/
-│   │   └── PlayerViewController.kt      # Pengelola Tampilan UI (View Binding tombol, SeekBar, durasi waktu)
+│   │   └── PlayerViewController.kt      # Pengelola Tampilan UI seperti View Binding tombol, SeekBar, durasi waktu
 │   └── dialog/
 │       └── AppDialogManager.kt          # Pengelola Seluruh Dialog (Duplikat, daftar offline, aksi file)
 │
