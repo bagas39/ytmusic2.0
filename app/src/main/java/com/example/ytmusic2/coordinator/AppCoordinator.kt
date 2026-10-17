@@ -39,8 +39,9 @@ class AppCoordinator(private val activity: AppCompatActivity) {
     private var currentOnlineTitle: String = ""
 
     fun onCreate() {
-        // 1. Cek & minta izin notifikasi, lalu jalankan Foreground Service
+        // 1. Cek & minta izin notifikasi serta optimasi baterai, lalu jalankan Foreground Service
         PermissionHelper.checkAndRequestNotificationPermission(activity)
+        PermissionHelper.requestIgnoreBatteryOptimization(activity)
         startBackgroundMusicService()
 
         // 2. Inisialisasi komponen UI & Dialog

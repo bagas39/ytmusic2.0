@@ -334,17 +334,68 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
 
             setupVideoHooks(document.querySelector('video'));
 
-            // MutationObserver untuk deteksi kelas ad-showing dan elemen iklan secara instant (0ms)
+            var _lastYouThereTime = 0;
+            function isElementVisible(el) {
+                if (!el) return false;
+                if (el.offsetParent === null && el.offsetWidth === 0 && el.offsetHeight === 0) return false;
+                var style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+                if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) return false;
+                return true;
+            }
+
+            function checkYouThere() {
+                var youThere = document.querySelector('ytmusic-you-there-renderer');
+                if (!youThere) return;
+
+                // Pastikan dialog benar-benar aktif/terlihat, bukan elemen dorman yang di-cache di DOM
+                var parentDlg = youThere.closest('tp-yt-paper-dialog, ytmusic-dialog, [role="dialog"]');
+                if (parentDlg) {
+                    if (parentDlg.getAttribute('aria-hidden') === 'true') return;
+                    if (parentDlg.style.display === 'none') return;
+                    if (typeof parentDlg.opened === 'boolean' && !parentDlg.opened) return;
+                    if (!isElementVisible(parentDlg)) return;
+                }
+
+                if (!isElementVisible(youThere)) return;
+
+                var confirmBtn = youThere.querySelector('yt-button-renderer[dialog-confirm] button, [dialog-confirm], tp-yt-paper-button, button');
+                if (!confirmBtn || !isElementVisible(confirmBtn)) return;
+
+                var now = Date.now();
+                if (now - _lastYouThereTime > 1500) {
+                    _lastYouThereTime = now;
+                    try {
+                        confirmBtn.click();
+                        console.log('[YTM-BYPASS] you-there CONFIRMED');
+                    } catch (e) {}
+
+                    setTimeout(function() {
+                        var v = document.querySelector('video');
+                        if (v && v.paused) {
+                            try {
+                                v.play();
+                                console.log('[YTM-BYPASS] you-there AUTO-RESUMED playback');
+                            } catch (e) {
+                                var pBtn = document.querySelector('#play-pause-button, .play-pause-button');
+                                if (pBtn) try { pBtn.click(); } catch (err) {}
+                            }
+                        }
+                    }, 250);
+                }
+            }
+
+            // MutationObserver untuk deteksi kelas ad-showing dan elemen iklan/dialog secara instant (0ms)
             if (!window._ytmAdObserver) {
                 try {
                     window._ytmAdObserver = new MutationObserver(function() {
                         skipAdsFast();
+                        checkYouThere();
                     });
                     window._ytmAdObserver.observe(document.body || document.documentElement, {
                         childList: true,
                         subtree: true,
                         attributes: true,
-                        attributeFilter: ['class']
+                        attributeFilter: ['class', 'dialog', 'open']
                     });
                 } catch (e) {}
             }
@@ -356,16 +407,7 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                 var v = document.querySelector('video');
                 setupVideoHooks(v);
                 skipAdsFast();
-
-                // "Are you still there?" -> auto-continue
-                var youThere = document.querySelector('ytmusic-you-there-renderer');
-                if (youThere) {
-                    try {
-                        console.log('[YTM-BYPASS] you-there FOUND: ' + youThere.outerHTML.slice(0, 500));
-                    } catch (e) {}
-                    var ytBtn = youThere.querySelector('tp-yt-paper-button, button, [role="button"]');
-                    if (ytBtn) { ytBtn.click(); console.log('[YTM-BYPASS] you-there CLICKED'); }
-                }
+                checkYouThere();
 
                 // Premium upsell / dialog -> tutup
                 var dismiss = document.querySelector(
@@ -376,6 +418,10 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                 if (!dismiss) {
                     var dialogs = document.querySelectorAll('tp-yt-paper-dialog, ytmusic-dialog');
                     dialogs.forEach(function(dlg) {
+                        // Jangan sentuh jika ini dialog you-there (sudah di-handle checkYouThere agar tidak double-click)
+                        if (dlg.querySelector('ytmusic-you-there-renderer')) {
+                            return;
+                        }
                         if (dlg.open || dlg.hasAttribute('open')) {
                             try {
                                 console.log('[YTM-BYPASS] dialog FOUND: ' + dlg.outerHTML.slice(0, 800));

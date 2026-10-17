@@ -62,3 +62,27 @@ desktop.ini
 
 # Documentation Proof-of-Concept (Local only)
 poc.md
+
+# Local RAG vector database & cache
+.rag/
+.rag_cache/
+.vectordb/
+*.db
+*.sqlite
+*.sqlite3
+
+# Sensitive environment, tokens, and credentials
+.env
+.env.*
+!.env.example
+secrets.json
+google-services.json
+oauth*.json
+*.pem
+*.key
+*.p12
+*.pfx
+*token*
+*.secret
+
+
