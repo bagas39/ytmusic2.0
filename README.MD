@@ -5,7 +5,7 @@
   <a href="https://developer.android.com"><img src="https://img.shields.io/badge/Platform-Android%207.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Platform"></a>
   <a href="https://kotlinlang.org"><img src="https://img.shields.io/badge/Language-Kotlin-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Language"></a>
   <a href="https://www.gnu.org/licenses/gpl-3.0"><img src="https://img.shields.io/badge/License-GPL%20v3.0-blue?style=flat-square&logo=gnu&logoColor=white" alt="License"></a>
-  <a href="https://github.com/bagas39/ytmusic2.0/releases"><img src="https://img.shields.io/github/downloads/bagas39/ytmusic2.0/total?color=orange&label=Downloads&logo=googleplay&logoColor=white&style=flat-square" alt="Downloads"></a>
+  <a href="https://github.com/bagas39/ytmusic2.0/releases"><img src="https://img.shields.io/github/downloads/bagas39/ytmusic2.0/total?logo=googleplay&logoColor=white&label=Downloads&color=orange&style=flat-square" alt="Downloads"></a>
 </p>
 
 Aplikasi Android pemutar dan pengunduh YouTube Music yang dibangun di atas WebView modern dengan dukungan pemutaran latar belakang penuh, pemblokir iklan Zero-Flicker & Zero-Delay, pengunduh audio on-device, serta pemutar musik offline interaktif.
