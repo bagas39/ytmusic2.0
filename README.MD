@@ -15,7 +15,7 @@ Aplikasi Android pemutar dan pengunduh YouTube Music yang dibangun di atas WebVi
 ## 🚀 Fitur Utama
 
 ### 1. Pemutaran Latar Belakang Penuh
-- **Activity & View Lifecycle Bypass **: 
+- **Activity & View Lifecycle Bypass**: 
   - **Siklus Hidup Activity**: Mengabaikan pemanggilan `webView.onPause()` dan `webView.pauseTimers()` saat Activity berada dalam status `onPause()` / `onStop()` agar eksekusi JavaScript dan pemrosesan media tidak dibekukan oleh sistem Android.
   - **Siklus Hidup Tampilan (View Window)**: Menggunakan subclass `KeepAliveWebView` yang menimpa callback `onWindowVisibilityChanged` untuk memaksakan status `View.VISIBLE` secara permanen ke lapisan internal engine Chromium, mencegah penghentian rendering saat layar HP dimatikan.
 - **Web DOM & Focus Bypass (Client Layer)**:
