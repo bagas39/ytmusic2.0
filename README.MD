@@ -9,7 +9,7 @@
 
 A fast, lightweight, and privacy-respecting YouTube Music client for Android. Built from the ground up to solve the most frustrating limitations of streaming on mobile: sudden playback stops when locking the screen, disruptive ads, and restricted offline access. 
 
-By combining a customized Chromium WebView runtime with native Android background services and an on-device `yt-dlp` extraction engine, **YTMusic 2.0** brings true background playback, seamless ad skipping, and lossless local MP3 downloads directly into your hands—without accounts, paid subscriptions, or root permissions.
+By combining a customized Chromium WebView runtime with native Android background services and an on-device `yt-dlp` extraction engine, **YTMusic 2.0** brings true background playback, seamless ad skipping, and lossless local MP3 downloads directly into your hands without requiring accounts, paid subscriptions, or root permissions.
 
 ---
 
@@ -28,14 +28,6 @@ Most mobile browsers and wrapper apps struggle with persistent playback because 
 | **System Notification Controls** | ⚠️ Limited | ✅ Media controls | ✅ **Full MediaStyle Notification (⏮ Prev, ⏯ Play/Pause, Next ⏭)** |
 | **Login Requirement** | Required for playlists | Required | 🔓 **Optional (Listen anonymously or sign in with your account)** |
 | **Cost & Freedom** | Free with heavy restrictions | Paid monthly subscription | **100% Free & Open Source (GPL-3.0)** |
-
----
-
-## 📸 Interface Preview
-
-<p align="center">
-  <img src="Screenshot 2026-10-14 142302.png" width="45%" alt="YTMusic 2.0 Interface & Offline Player">
-</p>
 
 ---
 
