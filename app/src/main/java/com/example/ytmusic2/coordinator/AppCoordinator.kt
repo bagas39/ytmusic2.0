@@ -62,12 +62,13 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         val serviceIntent = Intent(activity, MusicBackgroundService::class.java)
         ContextCompat.startForegroundService(activity, serviceIntent)
 
-        // Hoisting kontrol dari status bar notifikasi (Prev / Play-Pause / Next)
+        // Hoisting kontrol dari status bar notifikasi (Prev / Play-Pause / Pause / Next)
         MusicBackgroundService.controlCallback = { action ->
             activity.runOnUiThread {
                 when (action) {
                     MusicBackgroundService.ACTION_PREV -> handlePrevious()
                     MusicBackgroundService.ACTION_PLAY_PAUSE -> handlePlayPause()
+                    MusicBackgroundService.ACTION_PAUSE -> handlePause()
                     MusicBackgroundService.ACTION_NEXT -> handleNext()
                 }
             }
@@ -168,6 +169,14 @@ class AppCoordinator(private val activity: AppCompatActivity) {
             offlinePlayer.togglePlayPause()
         } else {
             webManager.clickPlayPause()
+        }
+    }
+
+    fun handlePause() {
+        if (offlinePlayer.isOfflineActive) {
+            offlinePlayer.pause()
+        } else {
+            webManager.pausePlayback()
         }
     }
 

@@ -122,6 +122,18 @@ class OfflinePlayerManager {
         }
     }
 
+    fun pause() {
+        val mp = mediaPlayer ?: return
+        try {
+            if (mp.isPlaying) {
+                mp.pause()
+                onPlaybackStateChanged?.invoke(false)
+            }
+        } catch (e: Exception) {
+            Log.e("OfflinePlayerManager", "pause error", e)
+        }
+    }
+
     fun playNext() {
         if (playlist.isEmpty()) return
         val nextIndex = (currentIndex + 1) % playlist.size

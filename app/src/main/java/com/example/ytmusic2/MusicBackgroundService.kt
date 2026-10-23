@@ -5,9 +5,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.media.AudioManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -19,6 +22,20 @@ class MusicBackgroundService : Service() {
     private var currentTitle: String = "YouTube Music"
     private var currentArtist: String = "Memutar di latar belakang"
     private var isPlaying: Boolean = true
+    private var isNoisyReceiverRegistered: Boolean = false
+
+    private val noisyAudioReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
+                controlCallback?.invoke(ACTION_PAUSE)
+                if (isPlaying) {
+                    isPlaying = false
+                    val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    manager.notify(NOTIFICATION_ID, buildNotification())
+                }
+            }
+        }
+    }
 
     companion object {
         const val CHANNEL_ID = "ytm_playback_channel"
@@ -26,6 +43,7 @@ class MusicBackgroundService : Service() {
 
         const val ACTION_PREV = "com.example.ytmusic2.ACTION_PREV"
         const val ACTION_PLAY_PAUSE = "com.example.ytmusic2.ACTION_PLAY_PAUSE"
+        const val ACTION_PAUSE = "com.example.ytmusic2.ACTION_PAUSE"
         const val ACTION_NEXT = "com.example.ytmusic2.ACTION_NEXT"
         const val ACTION_UPDATE_SONG = "com.example.ytmusic2.ACTION_UPDATE_SONG"
 
@@ -40,12 +58,13 @@ class MusicBackgroundService : Service() {
         super.onCreate()
         createNotificationChannel()
         acquireWakeLock()
+        registerNoisyReceiver()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
         when (action) {
-            ACTION_PREV, ACTION_PLAY_PAUSE, ACTION_NEXT -> {
+            ACTION_PREV, ACTION_PLAY_PAUSE, ACTION_PAUSE, ACTION_NEXT -> {
                 controlCallback?.invoke(action)
             }
             ACTION_UPDATE_SONG -> {
@@ -152,7 +171,29 @@ class MusicBackgroundService : Service() {
         }
     }
 
+    private fun registerNoisyReceiver() {
+        if (!isNoisyReceiverRegistered) {
+            val filter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(noisyAudioReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(noisyAudioReceiver, filter)
+            }
+            isNoisyReceiverRegistered = true
+        }
+    }
+
+    private fun unregisterNoisyReceiver() {
+        if (isNoisyReceiverRegistered) {
+            try {
+                unregisterReceiver(noisyAudioReceiver)
+            } catch (_: Exception) {}
+            isNoisyReceiverRegistered = false
+        }
+    }
+
     override fun onDestroy() {
+        unregisterNoisyReceiver()
         if (wakeLock?.isHeld == true) {
             wakeLock?.release()
         }
