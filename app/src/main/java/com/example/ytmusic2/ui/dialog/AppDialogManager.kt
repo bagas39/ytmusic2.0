@@ -1,6 +1,10 @@
 package com.example.ytmusic2.ui.dialog
 
 import android.content.Context
+import android.text.InputType
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import com.example.ytmusic2.util.FormatUtils
 import java.io.File
@@ -102,6 +106,78 @@ class AppDialogManager(private val context: Context) {
             .setTitle("Hapus Lagu?")
             .setMessage("Apakah Anda yakin ingin menghapus '${file.name}'?")
             .setPositiveButton("Hapus") { _, _ -> onConfirmDelete() }
+            .setNegativeButton("Batal", null)
+            .show()
+    }
+
+    /**
+     * Dialog pilihan waktu Sleep Timer (Pengatur Waktu Tidur).
+     */
+    fun showSleepTimerDialog(
+        isActive: Boolean,
+        remainingText: String?,
+        onSelectMinutes: (Int) -> Unit,
+        onCancelTimer: () -> Unit
+    ) {
+        val minutePresets = intArrayOf(15, 30, 45, 60)
+        val options = (minutePresets.map { "⏲ $it Menit" } + "✏️ Custom (Atur Menit Sendiri)...").toTypedArray()
+        val title = if (isActive && !remainingText.isNullOrBlank()) {
+            "Sleep Timer (Aktif: $remainingText)"
+        } else {
+            "Sleep Timer"
+        }
+
+        val builder = AlertDialog.Builder(context)
+            .setTitle(title)
+            .setItems(options) { _, which ->
+                if (which < minutePresets.size) {
+                    onSelectMinutes(minutePresets[which])
+                } else {
+                    showCustomSleepTimerInputDialog(onSelectMinutes)
+                }
+            }
+            .setNegativeButton("Tutup", null)
+
+        if (isActive) {
+            builder.setNeutralButton("❌ Matikan Timer") { _, _ ->
+                onCancelTimer()
+            }
+        }
+
+        builder.show()
+    }
+
+    /**
+     * Dialog input angka menit custom untuk Sleep Timer.
+     */
+    private fun showCustomSleepTimerInputDialog(onSelectMinutes: (Int) -> Unit) {
+        val density = context.resources.displayMetrics.density
+        val paddingHorizontal = (20 * density).toInt()
+        val paddingVertical = (8 * density).toInt()
+
+        val input = EditText(context).apply {
+            hint = "Contoh: 20 (dalam menit)"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setSingleLine()
+        }
+
+        val container = FrameLayout(context).apply {
+            setPadding(paddingHorizontal, paddingVertical, paddingHorizontal, 0)
+            addView(input)
+        }
+
+        AlertDialog.Builder(context)
+            .setTitle("Custom Sleep Timer")
+            .setMessage("Masukkan durasi waktu tidur (dalam menit):")
+            .setView(container)
+            .setPositiveButton("Mulai") { _, _ ->
+                val minutes = input.text.toString().trim().toIntOrNull()
+                if (minutes != null && minutes in 1..1440) {
+                    onSelectMinutes(minutes)
+                } else {
+                    Toast.makeText(context, "Masukkan angka menit yang valid (1 - 1440)", Toast.LENGTH_SHORT).show()
+                }
+            }
             .setNegativeButton("Batal", null)
             .show()
     }

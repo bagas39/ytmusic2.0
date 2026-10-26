@@ -31,6 +31,7 @@ class PlayerViewController(private val rootView: View) {
     private val btnNext: Button = rootView.findViewById(R.id.btnNext)
     private val btnDownload: Button = rootView.findViewById(R.id.btnDownload)
     private val btnOffline: Button = rootView.findViewById(R.id.btnOffline)
+    private val btnSleepTimer: Button = rootView.findViewById(R.id.btnSleepTimer)
 
     // Hoisted Events / Callbacks
     var onPreviousClicked: (() -> Unit)? = null
@@ -38,6 +39,7 @@ class PlayerViewController(private val rootView: View) {
     var onNextClicked: (() -> Unit)? = null
     var onDownloadClicked: (() -> Unit)? = null
     var onOfflineClicked: (() -> Unit)? = null
+    var onSleepTimerClicked: (() -> Unit)? = null
     var onOfflineCloseClicked: (() -> Unit)? = null
     var onSeekTrackingChanged: ((isTracking: Boolean) -> Unit)? = null
     var onSeekTo: ((progressMs: Int) -> Unit)? = null
@@ -52,6 +54,7 @@ class PlayerViewController(private val rootView: View) {
         btnNext.setOnClickListener { onNextClicked?.invoke() }
         btnDownload.setOnClickListener { onDownloadClicked?.invoke() }
         btnOffline.setOnClickListener { onOfflineClicked?.invoke() }
+        btnSleepTimer.setOnClickListener { onSleepTimerClicked?.invoke() }
         btnOfflineClose.setOnClickListener { onOfflineCloseClicked?.invoke() }
 
         sbOfflineProgress.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -110,5 +113,16 @@ class PlayerViewController(private val rootView: View) {
     fun updateProgress(currentMs: Int) {
         sbOfflineProgress.progress = currentMs
         tvOfflineCurrentTime.text = FormatUtils.formatDuration(currentMs)
+    }
+
+    /**
+     * Memperbarui label tombol Sleep Timer dengan sisa waktu hitung mundur.
+     */
+    fun updateSleepTimerButton(remainingMs: Long) {
+        if (remainingMs > 0L) {
+            btnSleepTimer.text = "⏲ ${FormatUtils.formatDuration(remainingMs.toInt())}"
+        } else {
+            btnSleepTimer.text = "⏲ Timer"
+        }
     }
 }

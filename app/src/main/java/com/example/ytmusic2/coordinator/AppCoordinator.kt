@@ -2,6 +2,7 @@ package com.example.ytmusic2.coordinator
 
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.CountDownTimer
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -13,6 +14,7 @@ import com.example.ytmusic2.player.OfflinePlayerManager
 import com.example.ytmusic2.ui.dialog.AppDialogManager
 import com.example.ytmusic2.ui.view.PlayerViewController
 import com.example.ytmusic2.util.FileUtils
+import com.example.ytmusic2.util.FormatUtils
 import com.example.ytmusic2.util.PermissionHelper
 import com.example.ytmusic2.webview.YtmWebManager
 import java.io.File
@@ -37,6 +39,8 @@ class AppCoordinator(private val activity: AppCompatActivity) {
     private lateinit var dialogManager: AppDialogManager
 
     private var currentOnlineTitle: String = ""
+    private var sleepTimer: CountDownTimer? = null
+    private var sleepTimerRemainingMs: Long = 0L
 
     fun onCreate() {
         // 1. Cek & minta izin notifikasi serta optimasi baterai, lalu jalankan Foreground Service
@@ -143,6 +147,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         viewController.onNextClicked = { handleNext() }
         viewController.onDownloadClicked = { startDownloadProcess() }
         viewController.onOfflineClicked = { showOfflineFiles() }
+        viewController.onSleepTimerClicked = { showSleepTimerOptions() }
         viewController.onOfflineCloseClicked = { offlinePlayer.stop() }
         viewController.onSeekTrackingChanged = { isTracking ->
             offlinePlayer.setUserTrackingSeekBar(isTracking)
@@ -307,6 +312,59 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         } catch (_: Exception) {}
     }
 
+    private fun showSleepTimerOptions() {
+        val isActive = sleepTimer != null && sleepTimerRemainingMs > 0L
+        val remainingText = if (isActive) {
+            FormatUtils.formatDuration(sleepTimerRemainingMs.toInt())
+        } else {
+            null
+        }
+        dialogManager.showSleepTimerDialog(
+            isActive = isActive,
+            remainingText = remainingText,
+            onSelectMinutes = { minutes ->
+                startSleepTimer(minutes)
+            },
+            onCancelTimer = {
+                cancelSleepTimer()
+                Toast.makeText(activity, "Sleep Timer dimatikan", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
+    private fun startSleepTimer(minutes: Int) {
+        sleepTimer?.cancel()
+        val durationMs = minutes * 60 * 1000L
+        sleepTimerRemainingMs = durationMs
+        viewController.updateSleepTimerButton(durationMs)
+
+        sleepTimer = object : CountDownTimer(durationMs, 1000L) {
+            override fun onTick(millisUntilFinished: Long) {
+                sleepTimerRemainingMs = millisUntilFinished
+                viewController.updateSleepTimerButton(millisUntilFinished)
+            }
+
+            override fun onFinish() {
+                sleepTimer = null
+                sleepTimerRemainingMs = 0L
+                viewController.updateSleepTimerButton(0L)
+                handlePause()
+                val title = lastNotifTitle ?: currentOnlineTitle.ifBlank { "YouTube Music" }
+                updatePlaybackNotification(title, "Timer tidur selesai", false)
+                Toast.makeText(activity, "Sleep Timer selesai, musik dihentikan", Toast.LENGTH_LONG).show()
+            }
+        }.start()
+
+        Toast.makeText(activity, "Sleep Timer diatur: $minutes menit", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun cancelSleepTimer() {
+        sleepTimer?.cancel()
+        sleepTimer = null
+        sleepTimerRemainingMs = 0L
+        viewController.updateSleepTimerButton(0L)
+    }
+
     // ==========================================
     // Lifecycle & Back Handlers
     // ==========================================
@@ -320,6 +378,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
     }
 
     fun onDestroy() {
+        cancelSleepTimer()
         MusicBackgroundService.controlCallback = null
         offlinePlayer.release()
         lastNotifTitle = null
