@@ -62,9 +62,25 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
             }
 
             @JavascriptInterface
-            fun onSongState(title: String, artist: String, isPlaying: Boolean) {
+            fun onSongState(
+                title: String,
+                artist: String,
+                isPlaying: Boolean,
+                durationMs: Long,
+                positionMs: Long,
+                artworkUrl: String
+            ) {
                 if (title.isNotEmpty()) {
-                    onSongStateChanged?.invoke(SongMetadata(title, artist, isPlaying))
+                    onSongStateChanged?.invoke(
+                        SongMetadata(
+                            title = title,
+                            artist = artist,
+                            isPlaying = isPlaying,
+                            durationMs = durationMs.coerceAtLeast(0L),
+                            positionMs = positionMs.coerceAtLeast(0L),
+                            artworkUrl = artworkUrl
+                        )
+                    )
                 }
             }
         }, "AndroidBridge")
@@ -170,6 +186,15 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
         executeJs("var v = document.querySelector('video'); if (v) v.pause();")
     }
 
+    fun resumePlayback() {
+        executeJs("var v = document.querySelector('video'); if (v && v.paused) v.play();")
+    }
+
+    fun seekTo(positionMs: Long) {
+        val seconds = positionMs.coerceAtLeast(0L) / 1000.0
+        executeJs("var v = document.querySelector('video'); if (v && isFinite(v.duration)) { v.currentTime = $seconds; }")
+    }
+
     fun captureCurrentSong() {
         val url = webView.url ?: return
         val videoId = extractVideoId(url)
@@ -178,22 +203,44 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
             (function() {
                 var sTitle = '';
                 var sArtist = '';
+                var sArt = '';
                 if (navigator.mediaSession && navigator.mediaSession.metadata) {
-                    sTitle = navigator.mediaSession.metadata.title || '';
-                    sArtist = navigator.mediaSession.metadata.artist || '';
+                    sTitle = (navigator.mediaSession.metadata.title || '').trim();
+                    sArtist = (navigator.mediaSession.metadata.artist || '').trim();
+                    var arts = navigator.mediaSession.metadata.artwork;
+                    if (arts && arts.length > 0) {
+                        sArt = arts[arts.length - 1].src || '';
+                    }
                 }
-                if (!sTitle) {
-                    var t = document.querySelector('ytmusic-player-bar .title, .ytmusic-player-bar .title, yt-formatted-string.title');
-                    if (t) sTitle = t.textContent.trim();
+                var playerBar = document.querySelector('ytmusic-player-bar');
+                if (playerBar) {
+                    if (!sTitle) {
+                        var t = playerBar.querySelector('.content-info-wrapper .title, yt-formatted-string.title, .title');
+                        if (t) sTitle = (t.getAttribute('title') || t.textContent || '').trim();
+                    }
+                    if (!sArtist) {
+                        var a = playerBar.querySelector('.content-info-wrapper .byline, .content-info-wrapper .subtitle, yt-formatted-string.byline, .byline, .subtitle');
+                        if (a) sArtist = (a.getAttribute('title') || a.textContent || '').trim();
+                    }
+                    if (!sArt) {
+                        var img = playerBar.querySelector('img.image, #song-image img, .thumbnail-image-wrapper img');
+                        if (img && img.src) sArt = img.src;
+                    }
                 }
-                if (!sArtist) {
-                    var a = document.querySelector('ytmusic-player-bar .byline, ytmusic-player-bar .subtitle, .ytmusic-player-bar .byline, .ytmusic-player-bar .subtitle');
-                    if (a) sArtist = a.textContent.trim();
+                var mp = document.getElementById('movie_player');
+                if (mp && typeof mp.getVideoData === 'function') {
+                    var vd = mp.getVideoData();
+                    if (vd) {
+                        if (!sTitle && vd.title) sTitle = vd.title.trim();
+                        if (!sArtist && vd.author) sArtist = vd.author.trim();
+                    }
                 }
                 var v = document.querySelector('video');
                 var isPlay = (v && !v.paused);
+                var durMs = (v && v.duration && isFinite(v.duration)) ? Math.round(v.duration * 1000) : 0;
+                var posMs = (v && v.currentTime && isFinite(v.currentTime)) ? Math.round(v.currentTime * 1000) : 0;
                 if (sTitle && window.AndroidBridge && window.AndroidBridge.onSongState) {
-                    window.AndroidBridge.onSongState(sTitle, sArtist, isPlay);
+                    window.AndroidBridge.onSongState(sTitle, sArtist, isPlay, durMs, posMs, sArt);
                 } else if (sTitle && window.AndroidBridge && window.AndroidBridge.onTitle) {
                     window.AndroidBridge.onTitle(sTitle);
                 }
@@ -437,29 +484,67 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                     dismiss.click();
                 }
 
-                // Laporkan status lagu untuk notifikasi Spotify-style (hanya jika ada perubahan)
+                // Laporkan metadata dan status pemutaran lagu ke MediaSession Android
                 try {
                     var sTitle = '';
                     var sArtist = '';
+                    var sArt = '';
                     if (navigator.mediaSession && navigator.mediaSession.metadata) {
-                        sTitle = navigator.mediaSession.metadata.title || '';
-                        sArtist = navigator.mediaSession.metadata.artist || '';
+                        sTitle = (navigator.mediaSession.metadata.title || '').trim();
+                        sArtist = (navigator.mediaSession.metadata.artist || '').trim();
+                        var arts = navigator.mediaSession.metadata.artwork;
+                        if (arts && arts.length > 0) {
+                            sArt = arts[arts.length - 1].src || '';
+                        }
                     }
-                    if (!sTitle) {
-                        var tElem = document.querySelector('ytmusic-player-bar .title, .ytmusic-player-bar .title, yt-formatted-string.title');
-                        if (tElem) sTitle = tElem.textContent.trim();
+                    var playerBar = document.querySelector('ytmusic-player-bar');
+                    if (playerBar) {
+                        if (!sTitle) {
+                            var tElem = playerBar.querySelector('.content-info-wrapper .title, yt-formatted-string.title, .title');
+                            if (tElem) sTitle = (tElem.getAttribute('title') || tElem.textContent || '').trim();
+                        }
+                        if (!sArtist) {
+                            var aElem = playerBar.querySelector('.content-info-wrapper .byline, .content-info-wrapper .subtitle, yt-formatted-string.byline, .byline, .subtitle');
+                            if (aElem) sArtist = (aElem.getAttribute('title') || aElem.textContent || '').trim();
+                        }
+                        if (!sArt) {
+                            var imgElem = playerBar.querySelector('img.image, #song-image img, .thumbnail-image-wrapper img');
+                            if (imgElem && imgElem.src) sArt = imgElem.src;
+                        }
                     }
-                    if (!sArtist) {
-                        var aElem = document.querySelector('ytmusic-player-bar .byline, ytmusic-player-bar .subtitle, .ytmusic-player-bar .byline, .ytmusic-player-bar .subtitle');
-                        if (aElem) sArtist = aElem.textContent.trim();
+                    var mp = document.getElementById('movie_player');
+                    if (mp && typeof mp.getVideoData === 'function') {
+                        var vd = mp.getVideoData();
+                        if (vd) {
+                            if (!sTitle && vd.title) sTitle = vd.title.trim();
+                            if (!sArtist && vd.author) sArtist = vd.author.trim();
+                        }
                     }
                     var isPlay = (v && !v.paused);
-                    if (sTitle && (sTitle !== window._lastReportedTitle || sArtist !== window._lastReportedArtist || isPlay !== window._lastReportedPlay)) {
+                    var durMs = (v && v.duration && isFinite(v.duration)) ? Math.round(v.duration * 1000) : 0;
+                    var posMs = (v && v.currentTime && isFinite(v.currentTime)) ? Math.round(v.currentTime * 1000) : 0;
+                    var nowMs = Date.now();
+                    var expectedPosMs = (window._lastReportedPos || 0) + (window._lastReportedPlay ? (nowMs - (window._lastReportTime || nowMs)) : 0);
+                    var isSeekJump = Math.abs(posMs - expectedPosMs) > 3500;
+                    var isDurChanged = Math.abs(durMs - (window._lastReportedDur || 0)) > 1500;
+
+                    if (sTitle && (
+                        sTitle !== window._lastReportedTitle ||
+                        sArtist !== window._lastReportedArtist ||
+                        isPlay !== window._lastReportedPlay ||
+                        sArt !== window._lastReportedArt ||
+                        isDurChanged ||
+                        isSeekJump
+                    )) {
                         window._lastReportedTitle = sTitle;
                         window._lastReportedArtist = sArtist;
                         window._lastReportedPlay = isPlay;
+                        window._lastReportedArt = sArt;
+                        window._lastReportedDur = durMs;
+                        window._lastReportedPos = posMs;
+                        window._lastReportTime = nowMs;
                         if (window.AndroidBridge && window.AndroidBridge.onSongState) {
-                            window.AndroidBridge.onSongState(sTitle, sArtist, isPlay);
+                            window.AndroidBridge.onSongState(sTitle, sArtist, isPlay, durMs, posMs, sArt);
                         }
                     }
                 } catch (e) {}

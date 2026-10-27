@@ -66,15 +66,21 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         val serviceIntent = Intent(activity, MusicBackgroundService::class.java)
         ContextCompat.startForegroundService(activity, serviceIntent)
 
-        // Hoisting kontrol dari status bar notifikasi (Prev / Play-Pause / Pause / Next)
+        // Hoisting kontrol dari MediaSession & status bar notifikasi
         MusicBackgroundService.controlCallback = { action ->
             activity.runOnUiThread {
                 when (action) {
                     MusicBackgroundService.ACTION_PREV -> handlePrevious()
+                    MusicBackgroundService.ACTION_PLAY -> handlePlay()
                     MusicBackgroundService.ACTION_PLAY_PAUSE -> handlePlayPause()
                     MusicBackgroundService.ACTION_PAUSE -> handlePause()
                     MusicBackgroundService.ACTION_NEXT -> handleNext()
                 }
+            }
+        }
+        MusicBackgroundService.seekCallback = { positionMs ->
+            activity.runOnUiThread {
+                handleSeekTo(positionMs)
             }
         }
     }
@@ -99,10 +105,26 @@ class AppCoordinator(private val activity: AppCompatActivity) {
                 if (offlinePlayer.isOfflineActive) {
                     if (metadata.isPlaying) {
                         offlinePlayer.stop()
-                        updatePlaybackNotification(metadata.title, metadata.artist, metadata.isPlaying)
+                        updatePlaybackNotification(
+                            title = metadata.title,
+                            artist = metadata.artist,
+                            isPlaying = metadata.isPlaying,
+                            durationMs = metadata.durationMs,
+                            positionMs = metadata.positionMs,
+                            artworkSource = metadata.artworkUrl,
+                            forceUpdate = true
+                        )
                     }
                 } else {
-                    updatePlaybackNotification(metadata.title, metadata.artist, metadata.isPlaying)
+                    updatePlaybackNotification(
+                        title = metadata.title,
+                        artist = metadata.artist,
+                        isPlaying = metadata.isPlaying,
+                        durationMs = metadata.durationMs,
+                        positionMs = metadata.positionMs,
+                        artworkSource = metadata.artworkUrl,
+                        forceUpdate = true
+                    )
                 }
             }
         }
@@ -111,7 +133,14 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         offlinePlayer = OfflinePlayerManager().apply {
             onTrackPrepared = { file, index, total, durationMs ->
                 viewController.showOfflinePlayer(file.nameWithoutExtension, durationMs)
-                updatePlaybackNotification(file.nameWithoutExtension, "Offline (${index + 1}/$total)", true)
+                updatePlaybackNotification(
+                    title = file.nameWithoutExtension,
+                    artist = "Offline (${index + 1}/$total)",
+                    isPlaying = true,
+                    durationMs = durationMs.toLong(),
+                    positionMs = 0L,
+                    artworkSource = file.absolutePath
+                )
             }
             onPlaybackStateChanged = { isPlaying ->
                 viewController.updatePlayPauseButton(isPlaying)
@@ -122,7 +151,14 @@ class AppCoordinator(private val activity: AppCompatActivity) {
                     } else {
                         "Lagu Offline"
                     }
-                    updatePlaybackNotification(song.nameWithoutExtension, artistText, isPlaying)
+                    updatePlaybackNotification(
+                        title = song.nameWithoutExtension,
+                        artist = artistText,
+                        isPlaying = isPlaying,
+                        durationMs = offlinePlayer.currentDurationMs,
+                        positionMs = offlinePlayer.currentPositionMs,
+                        artworkSource = song.absolutePath
+                    )
                 }
             }
             onProgressTick = { currentMs, _ ->
@@ -132,7 +168,14 @@ class AppCoordinator(private val activity: AppCompatActivity) {
                 viewController.hideOfflinePlayer()
                 val title = currentOnlineTitle.ifBlank { "YouTube Music" }
                 val artist = if (currentOnlineTitle.isNotBlank()) "Siap memutar" else "Tidak ada lagu yang diputar"
-                updatePlaybackNotification(title, artist, false)
+                updatePlaybackNotification(
+                    title = title,
+                    artist = artist,
+                    isPlaying = false,
+                    durationMs = 0L,
+                    positionMs = 0L,
+                    artworkSource = ""
+                )
                 webManager.captureCurrentSong()
             }
             onError = { msg ->
@@ -154,6 +197,23 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         }
         viewController.onSeekTo = { progressMs ->
             offlinePlayer.seekTo(progressMs)
+            val song = offlinePlayer.currentSong
+            if (song != null) {
+                val artistText = if (offlinePlayer.playlistSize > 0 && offlinePlayer.currentIndex >= 0) {
+                    "Offline (${offlinePlayer.currentIndex + 1}/${offlinePlayer.playlistSize})"
+                } else {
+                    "Lagu Offline"
+                }
+                updatePlaybackNotification(
+                    title = song.nameWithoutExtension,
+                    artist = artistText,
+                    isPlaying = offlinePlayer.isPlaying,
+                    durationMs = offlinePlayer.currentDurationMs,
+                    positionMs = progressMs.toLong(),
+                    artworkSource = song.absolutePath,
+                    forceUpdate = true
+                )
+            }
         }
     }
 
@@ -166,6 +226,14 @@ class AppCoordinator(private val activity: AppCompatActivity) {
             offlinePlayer.playPrevious()
         } else {
             webManager.clickPrevious()
+        }
+    }
+
+    fun handlePlay() {
+        if (offlinePlayer.isOfflineActive) {
+            offlinePlayer.resume()
+        } else {
+            webManager.resumePlayback()
         }
     }
 
@@ -190,6 +258,15 @@ class AppCoordinator(private val activity: AppCompatActivity) {
             offlinePlayer.playNext()
         } else {
             webManager.clickNext()
+        }
+    }
+
+    fun handleSeekTo(positionMs: Long) {
+        if (offlinePlayer.isOfflineActive) {
+            offlinePlayer.seekTo(positionMs.toInt())
+            viewController.updateProgress(positionMs.toInt())
+        } else {
+            webManager.seekTo(positionMs)
         }
     }
 
@@ -292,20 +369,41 @@ class AppCoordinator(private val activity: AppCompatActivity) {
     private var lastNotifTitle: String? = null
     private var lastNotifArtist: String? = null
     private var lastNotifPlaying: Boolean? = null
+    private var lastNotifDurationMs: Long? = null
+    private var lastNotifArtwork: String? = null
 
-    private fun updatePlaybackNotification(title: String, artist: String, isPlaying: Boolean) {
-        if (title == lastNotifTitle && artist == lastNotifArtist && isPlaying == lastNotifPlaying) {
+    private fun updatePlaybackNotification(
+        title: String,
+        artist: String,
+        isPlaying: Boolean,
+        durationMs: Long = 0L,
+        positionMs: Long = 0L,
+        artworkSource: String = "",
+        forceUpdate: Boolean = false
+    ) {
+        if (!forceUpdate &&
+            title == lastNotifTitle &&
+            artist == lastNotifArtist &&
+            isPlaying == lastNotifPlaying &&
+            durationMs == lastNotifDurationMs &&
+            artworkSource == lastNotifArtwork
+        ) {
             return
         }
         lastNotifTitle = title
         lastNotifArtist = artist
         lastNotifPlaying = isPlaying
+        lastNotifDurationMs = durationMs
+        lastNotifArtwork = artworkSource
 
         val serviceIntent = Intent(activity, MusicBackgroundService::class.java).apply {
             action = MusicBackgroundService.ACTION_UPDATE_SONG
             putExtra(MusicBackgroundService.EXTRA_TITLE, title)
             putExtra(MusicBackgroundService.EXTRA_ARTIST, artist)
             putExtra(MusicBackgroundService.EXTRA_IS_PLAYING, isPlaying)
+            putExtra(MusicBackgroundService.EXTRA_DURATION_MS, durationMs)
+            putExtra(MusicBackgroundService.EXTRA_POSITION_MS, positionMs)
+            putExtra(MusicBackgroundService.EXTRA_ARTWORK_SOURCE, artworkSource)
         }
         try {
             ContextCompat.startForegroundService(activity, serviceIntent)
@@ -380,10 +478,13 @@ class AppCoordinator(private val activity: AppCompatActivity) {
     fun onDestroy() {
         cancelSleepTimer()
         MusicBackgroundService.controlCallback = null
+        MusicBackgroundService.seekCallback = null
         offlinePlayer.release()
         lastNotifTitle = null
         lastNotifArtist = null
         lastNotifPlaying = null
+        lastNotifDurationMs = null
+        lastNotifArtwork = null
     }
 
     fun handleBackPressed(): Boolean {

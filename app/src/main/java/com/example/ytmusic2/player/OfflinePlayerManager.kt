@@ -40,6 +40,20 @@ class OfflinePlayerManager {
     val currentSong: File?
         get() = playlist.getOrNull(currentIndex)
 
+    val currentDurationMs: Long
+        get() = try {
+            mediaPlayer?.duration?.toLong()?.coerceAtLeast(0L) ?: 0L
+        } catch (_: Exception) {
+            0L
+        }
+
+    val currentPositionMs: Long
+        get() = try {
+            mediaPlayer?.currentPosition?.toLong()?.coerceAtLeast(0L) ?: 0L
+        } catch (_: Exception) {
+            0L
+        }
+
     fun setPlaylist(files: List<File>) {
         playlist = files
         if (currentIndex >= playlist.size) {
@@ -131,6 +145,18 @@ class OfflinePlayerManager {
             }
         } catch (e: Exception) {
             Log.e("OfflinePlayerManager", "pause error", e)
+        }
+    }
+
+    fun resume() {
+        val mp = mediaPlayer ?: return
+        try {
+            if (!mp.isPlaying) {
+                mp.start()
+                onPlaybackStateChanged?.invoke(true)
+            }
+        } catch (e: Exception) {
+            Log.e("OfflinePlayerManager", "resume error", e)
         }
     }
 
