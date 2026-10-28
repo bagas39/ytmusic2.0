@@ -14,12 +14,20 @@ class OfflinePlayerManager {
     var onProgressTick: ((currentMs: Int, totalMs: Int) -> Unit)? = null
     var onPlayerStopped: (() -> Unit)? = null
     var onError: ((message: String) -> Unit)? = null
+    var onModesChanged: ((isShuffle: Boolean, repeatMode: RepeatMode) -> Unit)? = null
 
     private var mediaPlayer: MediaPlayer? = null
+    private var originalPlaylist: List<File> = emptyList()
     private var playlist: List<File> = emptyList()
     var currentIndex: Int = -1
         private set
     private var isUserTrackingSeekBar: Boolean = false
+
+    var isShuffle: Boolean = false
+        private set
+
+    var repeatMode: RepeatMode = RepeatMode.OFF
+        private set
 
     val playlistSize: Int
         get() = playlist.size
@@ -55,7 +63,47 @@ class OfflinePlayerManager {
         }
 
     fun setPlaylist(files: List<File>) {
-        playlist = files
+        originalPlaylist = files
+        syncPlaylistOrder(preserveCurrentSong = true)
+    }
+
+    fun toggleShuffle(): Boolean {
+        isShuffle = !isShuffle
+        syncPlaylistOrder(preserveCurrentSong = true)
+        onModesChanged?.invoke(isShuffle, repeatMode)
+        return isShuffle
+    }
+
+    fun cycleRepeatMode(): RepeatMode {
+        repeatMode = when (repeatMode) {
+            RepeatMode.OFF -> RepeatMode.ALL
+            RepeatMode.ALL -> RepeatMode.ONE
+            RepeatMode.ONE -> RepeatMode.OFF
+        }
+        onModesChanged?.invoke(isShuffle, repeatMode)
+        return repeatMode
+    }
+
+    private fun syncPlaylistOrder(preserveCurrentSong: Boolean) {
+        val currentFile = currentSong
+        if (isShuffle) {
+            val shuffled = originalPlaylist.shuffled()
+            if (preserveCurrentSong && currentFile != null) {
+                playlist = listOf(currentFile) + (shuffled.filterNot { it.absolutePath == currentFile.absolutePath })
+                currentIndex = 0
+            } else {
+                playlist = shuffled
+                currentIndex = if (currentFile != null) {
+                    playlist.indexOfFirst { it.absolutePath == currentFile.absolutePath }
+                } else -1
+            }
+        } else {
+            playlist = originalPlaylist
+            currentIndex = if (currentFile != null) {
+                playlist.indexOfFirst { it.absolutePath == currentFile.absolutePath }
+            } else -1
+        }
+
         if (currentIndex >= playlist.size) {
             currentIndex = -1
         }
@@ -74,12 +122,28 @@ class OfflinePlayerManager {
 
     fun playSongAtIndex(index: Int, newPlaylist: List<File>? = null) {
         if (newPlaylist != null) {
-            playlist = newPlaylist
+            originalPlaylist = newPlaylist
+            if (isShuffle) {
+                val targetFile = newPlaylist.getOrNull(index)
+                val shuffled = newPlaylist.shuffled()
+                if (targetFile != null) {
+                    playlist = listOf(targetFile) + (shuffled.filterNot { it.absolutePath == targetFile.absolutePath })
+                    currentIndex = 0
+                } else {
+                    playlist = shuffled
+                    currentIndex = 0
+                }
+            } else {
+                playlist = originalPlaylist
+                currentIndex = index
+            }
+        } else {
+            currentIndex = index
         }
-        if (playlist.isEmpty() || index !in playlist.indices) return
 
-        currentIndex = index
-        val file = playlist[index]
+        if (playlist.isEmpty() || currentIndex !in playlist.indices) return
+
+        val file = playlist[currentIndex]
 
         stopSeekUpdater()
         try {
@@ -99,12 +163,7 @@ class OfflinePlayerManager {
                     onPlaybackStateChanged?.invoke(true)
                 }
                 setOnCompletionListener {
-                    if (playlist.isNotEmpty()) {
-                        val nextIndex = (currentIndex + 1) % playlist.size
-                        playSongAtIndex(nextIndex)
-                    } else {
-                        stop()
-                    }
+                    handleTrackCompletion()
                 }
                 setOnErrorListener { _, what, extra ->
                     val msg = "Gagal memutar audio offline ($what, $extra)"
@@ -118,6 +177,40 @@ class OfflinePlayerManager {
             val msg = "Gagal memutar file: ${e.message}"
             onError?.invoke(msg)
             stop()
+        }
+    }
+
+    private fun handleTrackCompletion() {
+        if (playlist.isEmpty()) {
+            stop()
+            return
+        }
+
+        when (repeatMode) {
+            RepeatMode.ONE -> {
+                // Ulang lagu yang sama
+                seekTo(0)
+                try {
+                    mediaPlayer?.start()
+                    onPlaybackStateChanged?.invoke(true)
+                } catch (_: Exception) {
+                    playSongAtIndex(currentIndex)
+                }
+            }
+            RepeatMode.ALL -> {
+                // Putar lagu berikutnya, jika sudah di akhir ulangi dari indeks 0
+                val nextIndex = (currentIndex + 1) % playlist.size
+                playSongAtIndex(nextIndex)
+            }
+            RepeatMode.OFF -> {
+                // Putar lagu berikutnya, jika sudah di akhir daftar maka stop
+                val nextIndex = currentIndex + 1
+                if (nextIndex < playlist.size) {
+                    playSongAtIndex(nextIndex)
+                } else {
+                    stop()
+                }
+            }
         }
     }
 
@@ -162,7 +255,11 @@ class OfflinePlayerManager {
 
     fun playNext() {
         if (playlist.isEmpty()) return
-        val nextIndex = (currentIndex + 1) % playlist.size
+        val nextIndex = if (repeatMode == RepeatMode.OFF && currentIndex + 1 >= playlist.size) {
+            0
+        } else {
+            (currentIndex + 1) % playlist.size
+        }
         playSongAtIndex(nextIndex)
     }
 

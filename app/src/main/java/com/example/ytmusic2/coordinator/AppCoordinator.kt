@@ -181,6 +181,9 @@ class AppCoordinator(private val activity: AppCompatActivity) {
             onError = { msg ->
                 Toast.makeText(activity, msg, Toast.LENGTH_SHORT).show()
             }
+            onModesChanged = { isShuffle, repeatMode ->
+                viewController.updatePlaybackModes(isShuffle, repeatMode)
+            }
         }
     }
 
@@ -192,6 +195,20 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         viewController.onOfflineClicked = { showOfflineFiles() }
         viewController.onSleepTimerClicked = { showSleepTimerOptions() }
         viewController.onOfflineCloseClicked = { offlinePlayer.stop() }
+        viewController.onShuffleClicked = {
+            val enabled = offlinePlayer.toggleShuffle()
+            val text = if (enabled) "Shuffle: Aktif" else "Shuffle: Nonaktif"
+            Toast.makeText(activity, text, Toast.LENGTH_SHORT).show()
+        }
+        viewController.onRepeatClicked = {
+            val mode = offlinePlayer.cycleRepeatMode()
+            val text = when (mode) {
+                com.example.ytmusic2.player.RepeatMode.OFF -> "Repeat: Nonaktif"
+                com.example.ytmusic2.player.RepeatMode.ALL -> "Repeat: Semua Lagu"
+                com.example.ytmusic2.player.RepeatMode.ONE -> "Repeat: Satu Lagu"
+            }
+            Toast.makeText(activity, text, Toast.LENGTH_SHORT).show()
+        }
         viewController.onSeekTrackingChanged = { isTracking ->
             offlinePlayer.setUserTrackingSeekBar(isTracking)
         }

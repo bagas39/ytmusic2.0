@@ -54,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ytmusic2.R
+import com.example.ytmusic2.player.RepeatMode
 import com.example.ytmusic2.util.FormatUtils
 
 /**
@@ -76,6 +77,8 @@ class PlayerViewController(private val rootView: View) {
     private var isDraggingSliderState by mutableStateOf(false)
     private var playPauseLabelState by mutableStateOf("⏯ Play / Pause")
     private var sleepTimerRemainingMsState by mutableLongStateOf(0L)
+    private var isShuffleState by mutableStateOf(false)
+    private var repeatModeState by mutableStateOf(RepeatMode.OFF)
 
     // Hoisted Events / Callbacks
     var onPreviousClicked: (() -> Unit)? = null
@@ -85,6 +88,8 @@ class PlayerViewController(private val rootView: View) {
     var onOfflineClicked: (() -> Unit)? = null
     var onSleepTimerClicked: (() -> Unit)? = null
     var onOfflineCloseClicked: (() -> Unit)? = null
+    var onShuffleClicked: (() -> Unit)? = null
+    var onRepeatClicked: (() -> Unit)? = null
     var onSeekTrackingChanged: ((isTracking: Boolean) -> Unit)? = null
     var onSeekTo: ((progressMs: Int) -> Unit)? = null
 
@@ -205,6 +210,58 @@ class PlayerViewController(private val rootView: View) {
                                 }
 
                                 Spacer(modifier = Modifier.width(8.dp))
+
+                                // Tombol Shuffle
+                                val shuffleBg = if (isShuffleState) Color(0xFF3D1620) else Color(0xFF24242C)
+                                val shuffleBorder = if (isShuffleState) ytmCrimsonLight else Color(0xFF33333F)
+                                val shuffleColor = if (isShuffleState) ytmCrimsonLight else Color(0xFFB5B5B5)
+
+                                Surface(
+                                    onClick = { onShuffleClicked?.invoke() },
+                                    shape = CircleShape,
+                                    color = shuffleBg,
+                                    border = BorderStroke(1.dp, shuffleBorder),
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = "🔀",
+                                            fontSize = 11.sp,
+                                            color = shuffleColor
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(6.dp))
+
+                                // Tombol Repeat (Off -> All -> One)
+                                val isRepeatActive = repeatModeState != RepeatMode.OFF
+                                val repeatBg = if (isRepeatActive) Color(0xFF3D1620) else Color(0xFF24242C)
+                                val repeatBorder = if (isRepeatActive) ytmCrimsonLight else Color(0xFF33333F)
+                                val repeatColor = if (isRepeatActive) ytmCrimsonLight else Color(0xFFB5B5B5)
+                                val repeatText = when (repeatModeState) {
+                                    RepeatMode.OFF -> "🔁"
+                                    RepeatMode.ALL -> "🔁"
+                                    RepeatMode.ONE -> "🔂"
+                                }
+
+                                Surface(
+                                    onClick = { onRepeatClicked?.invoke() },
+                                    shape = CircleShape,
+                                    color = repeatBg,
+                                    border = BorderStroke(1.dp, repeatBorder),
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = repeatText,
+                                            fontSize = 11.sp,
+                                            color = repeatColor
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(6.dp))
 
                                 Surface(
                                     onClick = { onOfflineCloseClicked?.invoke() },
@@ -489,6 +546,14 @@ class PlayerViewController(private val rootView: View) {
         if (!isDraggingSliderState) {
             sliderDragValueState = currentMs.toFloat()
         }
+    }
+
+    /**
+     * Memperbarui status shuffle dan repeat mode pada UI.
+     */
+    fun updatePlaybackModes(isShuffle: Boolean, repeatMode: RepeatMode) {
+        isShuffleState = isShuffle
+        repeatModeState = repeatMode
     }
 
     /**
