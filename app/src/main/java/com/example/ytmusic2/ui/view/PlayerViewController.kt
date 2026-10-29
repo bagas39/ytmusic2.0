@@ -11,6 +11,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -33,8 +35,10 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -56,6 +60,7 @@ import androidx.compose.ui.unit.sp
 import com.example.ytmusic2.R
 import com.example.ytmusic2.player.RepeatMode
 import com.example.ytmusic2.util.FormatUtils
+import kotlinx.coroutines.delay
 
 /**
  * Mengontrol interaksi tampilan menggunakan arsitektur Hybrid:
@@ -79,6 +84,15 @@ class PlayerViewController(private val rootView: View) {
     private var sleepTimerRemainingMsState by mutableLongStateOf(0L)
     private var isShuffleState by mutableStateOf(false)
     private var repeatModeState by mutableStateOf(RepeatMode.OFF)
+
+    // Ad Counter States
+    private var adSkipPopupVisibleState by mutableStateOf(false)
+    private var lastSkippedCountState by mutableIntStateOf(1)
+    private var lastSkippedSecondsState by mutableIntStateOf(15)
+    private var adSkipTotalCountState by mutableIntStateOf(0)
+    private var adSkipTotalSecondsState by mutableIntStateOf(0)
+    private var adSkipTriggerIdState by mutableIntStateOf(0)
+    private var showAdStatsDialogState by mutableStateOf(false)
 
     // Hoisted Events / Callbacks
     var onPreviousClicked: (() -> Unit)? = null
@@ -116,7 +130,22 @@ class PlayerViewController(private val rootView: View) {
 
             MaterialTheme(colorScheme = ytmDarkColorScheme) {
                 YtmModernControlDock()
+                AdStatsDialog()
             }
+        }
+    }
+
+    private fun formatSavedTime(totalSeconds: Int): String {
+        if (totalSeconds < 60) return "${totalSeconds}d"
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val seconds = totalSeconds % 60
+        return if (hours > 0) {
+            "${hours}j ${minutes}m"
+        } else if (seconds > 0) {
+            "${minutes}m ${seconds}d"
+        } else {
+            "${minutes}m"
         }
     }
 
@@ -130,6 +159,14 @@ class PlayerViewController(private val rootView: View) {
         val ytmCrimson = Color(0xFFFF0033)
         val ytmCrimsonLight = Color(0xFFFF4D6D)
         val mutedText = Color(0xFFAAAAAA)
+
+        LaunchedEffect(adSkipTriggerIdState) {
+            if (adSkipTriggerIdState > 0) {
+                adSkipPopupVisibleState = true
+                delay(3000L)
+                adSkipPopupVisibleState = false
+            }
+        }
 
         Surface(
             modifier = Modifier.fillMaxWidth(),
@@ -148,6 +185,60 @@ class PlayerViewController(private val rootView: View) {
                     thickness = 1.dp,
                     color = Color(0xFF26262E)
                 )
+
+                // Notifikasi Ringan Saat Iklan Dilewati (Selaras dengan Tema Obsidian & Crimson)
+                AnimatedVisibility(
+                    visible = adSkipPopupVisibleState,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    val skipLabel = if (lastSkippedCountState > 1) {
+                        "${lastSkippedCountState} iklan bertumpuk dilewati (${lastSkippedSecondsState}d)"
+                    } else {
+                        "1 iklan dilewati (${lastSkippedSecondsState}d)"
+                    }
+
+                    Surface(
+                        onClick = { showAdStatsDialogState = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 2.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = cardSurface,
+                        border = BorderStroke(1.dp, subtleBorder)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .clip(CircleShape)
+                                        .background(ytmCrimsonLight)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = skipLabel,
+                                    color = Color(0xFFEAEAEA),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+
+                            Text(
+                                text = "Total: $adSkipTotalCountState · ${formatSavedTime(adSkipTotalSecondsState)}",
+                                color = mutedText,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                }
 
                 // Panel Pemutar Offline (Muncul dengan animasi halus saat aktif)
                 AnimatedVisibility(
@@ -339,7 +430,7 @@ class PlayerViewController(private val rootView: View) {
                     }
                 }
 
-                // Area Tombol Navigasi & Aksi Cepat
+                // Area Tombol Navigasi & Aksi Cepat (Grid 3-Kolom Simetris)
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -417,7 +508,7 @@ class PlayerViewController(private val rootView: View) {
                         }
                     }
 
-                    // Baris 2: Aksi Cepat (Unduh, Offline, Sleep Timer)
+                    // Baris 2: Aksi Cepat (Unduh, Offline, Sleep Timer — 3 Kolom Seimbang)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -503,8 +594,94 @@ class PlayerViewController(private val rootView: View) {
                             )
                         }
                     }
+
+                    // Baris Status Minimalis (Hanya tampil jika sudah ada iklan yang dilewati)
+                    if (adSkipTotalCountState > 0 && !adSkipPopupVisibleState) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { showAdStatsDialogState = true }
+                                .padding(vertical = 2.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "$adSkipTotalCountState iklan dilewati · ${formatSavedTime(adSkipTotalSecondsState)} dihemat",
+                                color = Color(0xFF757582),
+                                fontSize = 10.5.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
                 }
             }
+        }
+    }
+
+    @Composable
+    private fun AdStatsDialog() {
+        if (!showAdStatsDialogState) return
+
+        val totalAds = adSkipTotalCountState
+        val totalSeconds = adSkipTotalSecondsState
+        // Estimasi rata-rata bitrate stream video iklan 480p (~165 KB/detik)
+        val dataSavedMb = String.format("%.1f MB", (totalSeconds * 0.165f))
+
+        AlertDialog(
+            onDismissRequest = { showAdStatsDialogState = false },
+            confirmButton = {
+                TextButton(onClick = { showAdStatsDialogState = false }) {
+                    Text("Tutup", color = Color(0xFFFF4D6D), fontWeight = FontWeight.SemiBold)
+                }
+            },
+            containerColor = Color(0xFF16161C),
+            shape = RoundedCornerShape(16.dp),
+            title = {
+                Text(
+                    text = "Statistik Pemblokir Iklan",
+                    color = Color(0xFFF1F1F1),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            },
+            text = {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF1F1F27),
+                    border = BorderStroke(1.dp, Color(0xFF2C2C35)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        StatRow("Iklan dilewati", "$totalAds")
+                        HorizontalDivider(thickness = 0.5.dp, color = Color(0xFF2C2C35))
+                        StatRow("Waktu dihemat", formatSavedTime(totalSeconds))
+                        HorizontalDivider(thickness = 0.5.dp, color = Color(0xFF2C2C35))
+                        StatRow("Estimasi data dihemat", dataSavedMb)
+                    }
+                }
+            }
+        )
+    }
+
+    @Composable
+    private fun StatRow(label: String, value: String) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text = label, color = Color(0xFF9E9EA8), fontSize = 12.5.sp)
+            Text(
+                text = value,
+                color = Color(0xFFF1F1F1),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = FontFamily.Monospace
+            )
         }
     }
 
@@ -561,5 +738,29 @@ class PlayerViewController(private val rootView: View) {
      */
     fun updateSleepTimerButton(remainingMs: Long) {
         sleepTimerRemainingMsState = remainingMs
+    }
+
+    /**
+     * Mengatur angka awal total iklan dan durasi yang dilewati tanpa memicu popup banner.
+     */
+    fun setInitialAdStats(totalSkipped: Int, totalSeconds: Int) {
+        adSkipTotalCountState = totalSkipped
+        adSkipTotalSecondsState = totalSeconds
+    }
+
+    /**
+     * Menampilkan notifikasi ringan saat iklan berhasil dilewati beserta durasi aslinya.
+     */
+    fun showAdSkippedPopup(
+        skippedCount: Int,
+        skippedSeconds: Int,
+        totalSkipped: Int,
+        totalSeconds: Int
+    ) {
+        lastSkippedCountState = skippedCount
+        lastSkippedSecondsState = skippedSeconds
+        adSkipTotalCountState = totalSkipped
+        adSkipTotalSecondsState = totalSeconds
+        adSkipTriggerIdState += 1
     }
 }

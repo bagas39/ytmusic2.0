@@ -33,6 +33,7 @@ import java.io.File
 class AppCoordinator(private val activity: AppCompatActivity) {
 
     private lateinit var webManager: YtmWebManager
+    private lateinit var adSkipObserver: com.example.ytmusic2.webview.AdSkipObserver
     private lateinit var offlinePlayer: OfflinePlayerManager
     private lateinit var downloader: SongDownloader
     private lateinit var viewController: PlayerViewController
@@ -51,6 +52,15 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         // 2. Inisialisasi komponen UI & Dialog
         viewController = PlayerViewController(activity)
         dialogManager = AppDialogManager(activity)
+
+        val initialPrefs = activity.getSharedPreferences("ytm_prefs", android.content.Context.MODE_PRIVATE)
+        val savedAdsTotal = initialPrefs.getInt("total_ads_skipped", 0)
+        var savedSecondsTotal = initialPrefs.getInt("total_ad_seconds_saved", 0)
+        if (savedSecondsTotal == 0 && savedAdsTotal > 0) {
+            savedSecondsTotal = savedAdsTotal * 15
+            initialPrefs.edit().putInt("total_ad_seconds_saved", savedSecondsTotal).apply()
+        }
+        viewController.setInitialAdStats(savedAdsTotal, savedSecondsTotal)
 
         // 3. Inisialisasi modul logika & domain
         initModules()
@@ -93,9 +103,27 @@ class AppCoordinator(private val activity: AppCompatActivity) {
             })
         }
 
-        // Web Manager
+        // Web Manager & Ad Skip Observer (Terisolasi dari bypass engine)
         val webView = activity.findViewById<KeepAliveWebView>(R.id.webViewYoutubeMusic)
+        adSkipObserver = com.example.ytmusic2.webview.AdSkipObserver(webView).apply {
+            onAdsSkipped = { count, durationSeconds ->
+                val prefs = activity.getSharedPreferences("ytm_prefs", android.content.Context.MODE_PRIVATE)
+                val updatedTotal = prefs.getInt("total_ads_skipped", 0) + count
+                val updatedSeconds = prefs.getInt("total_ad_seconds_saved", 0) + durationSeconds
+                prefs.edit()
+                    .putInt("total_ads_skipped", updatedTotal)
+                    .putInt("total_ad_seconds_saved", updatedSeconds)
+                    .apply()
+                activity.runOnUiThread {
+                    viewController.showAdSkippedPopup(count, durationSeconds, updatedTotal, updatedSeconds)
+                }
+            }
+        }
+
         webManager = YtmWebManager(webView).apply {
+            onPageLifecycleInject = {
+                adSkipObserver.injectObserverScript()
+            }
             onTitleDetected = { title ->
                 currentOnlineTitle = title
             }
@@ -489,10 +517,12 @@ class AppCoordinator(private val activity: AppCompatActivity) {
 
     fun onPause() {
         webManager.injectBypassScript()
+        adSkipObserver.injectObserverScript()
     }
 
     fun onStop() {
         webManager.injectBypassScript()
+        adSkipObserver.injectObserverScript()
     }
 
     fun onDestroy() {

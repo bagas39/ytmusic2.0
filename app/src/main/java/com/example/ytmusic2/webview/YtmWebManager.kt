@@ -16,6 +16,7 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
 
     var onSongStateChanged: ((SongMetadata) -> Unit)? = null
     var onTitleDetected: ((String) -> Unit)? = null
+    var onPageLifecycleInject: (() -> Unit)? = null
 
     private val adHosts = arrayOf(
         "googleads.g.doubleclick.net",
@@ -131,11 +132,13 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                 super.onPageStarted(view, url, favicon)
+                onPageLifecycleInject?.invoke()
                 injectBypassScript()
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
+                onPageLifecycleInject?.invoke()
                 injectBypassScript()
                 captureCurrentSong()
             }
@@ -276,6 +279,9 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                             var clone = response.clone();
                             var data = await clone.json();
                             if (data && (data.adPlacements || data.playerAds || data.adSlots)) {
+                                (window._ytmStrippedPayloads = window._ytmStrippedPayloads || []).push({
+                                    p: data.playerAds, a: data.adPlacements, s: data.adSlots
+                                });
                                 delete data.adPlacements;
                                 delete data.playerAds;
                                 delete data.adSlots;
@@ -297,6 +303,13 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
             // Strip adPlacements from initial player response if present
             try {
                 if (window.ytInitialPlayerResponse) {
+                    if (window.ytInitialPlayerResponse.adPlacements || window.ytInitialPlayerResponse.playerAds || window.ytInitialPlayerResponse.adSlots) {
+                        (window._ytmStrippedPayloads = window._ytmStrippedPayloads || []).push({
+                            p: window.ytInitialPlayerResponse.playerAds,
+                            a: window.ytInitialPlayerResponse.adPlacements,
+                            s: window.ytInitialPlayerResponse.adSlots
+                        });
+                    }
                     delete window.ytInitialPlayerResponse.adPlacements;
                     delete window.ytInitialPlayerResponse.playerAds;
                     delete window.ytInitialPlayerResponse.adSlots;
@@ -333,11 +346,26 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                 var v = document.querySelector('video');
 
                 if (isAd && v) {
+                    var adId = (player && typeof player.getAdVideoId === 'function') ? (player.getAdVideoId() || '') : '';
+                    var adSig = adId || (v.currentSrc || v.src || 'dom_ad');
+                    var nowSkipTs = Date.now();
+                    var isNewAdPod = (adSig !== window._ytmLastAdSig) ||
+                                     (window._ytmAdJumpedToEnd && v.currentTime < 1.5 && (nowSkipTs - (window._ytmLastAdCountTs || 0) > 300));
+                    if (isNewAdPod) {
+                        window._ytmLastAdSig = adSig;
+                        window._ytmLastAdCountTs = nowSkipTs;
+                        window._ytmAdJumpedToEnd = false;
+                        var domDur = (isFinite(v.duration) && v.duration > 0) ? Math.round(v.duration) : 15;
+                        (window._ytmStrippedPayloads = window._ytmStrippedPayloads || []).push({
+                            domAd: true, dur: domDur
+                        });
+                    }
                     v.muted = true;
                     v.playbackRate = 16.0;
                     if (isFinite(v.duration) && v.duration > 0) {
                         try {
                             v.currentTime = v.duration;
+                            window._ytmAdJumpedToEnd = true;
                         } catch (e) {}
                     }
                     if (player && typeof player.skipAd === 'function') {
@@ -355,6 +383,8 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                         });
                     }
                 } else {
+                    window._ytmLastAdSig = '';
+                    window._ytmAdJumpedToEnd = false;
                     if (_fastSkipRaf) {
                         cancelAnimationFrame(_fastSkipRaf);
                         _fastSkipRaf = null;
