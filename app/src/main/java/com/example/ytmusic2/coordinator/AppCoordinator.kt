@@ -306,6 +306,9 @@ class AppCoordinator(private val activity: AppCompatActivity) {
             onStart = { displayTitle ->
                 Toast.makeText(activity, "Mulai mengunduh: $displayTitle", Toast.LENGTH_SHORT).show()
             },
+            onQueued = { displayTitle, queuePosition ->
+                Toast.makeText(activity, "Ditambahkan ke antrean (#$queuePosition): $displayTitle", Toast.LENGTH_SHORT).show()
+            },
             onDuplicateFound = { existingFile ->
                 dialogManager.showDuplicateConfirmDialog(
                     existingFile = existingFile,

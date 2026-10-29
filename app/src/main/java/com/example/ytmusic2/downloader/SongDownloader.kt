@@ -15,6 +15,7 @@ import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import java.io.File
+import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.concurrent.thread
 
 class SongDownloader(private val context: Context) {
@@ -25,8 +26,14 @@ class SongDownloader(private val context: Context) {
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val queue = ConcurrentLinkedQueue<DownloadTask>()
+
+    @Volatile
     var isBusy: Boolean = false
         private set
+
+    val queueSize: Int
+        get() = queue.size
 
     init {
         createDownloadNotificationChannel()
@@ -66,7 +73,7 @@ class SongDownloader(private val context: Context) {
     }
 
     /**
-     * Mengunduh lagu dari YouTube Music menggunakan yt-dlp dan FFmpeg.
+     * Menambahkan permintaan unduhan lagu ke dalam antrean (FIFO).
      */
     fun downloadSong(
         videoId: String,
@@ -75,12 +82,10 @@ class SongDownloader(private val context: Context) {
         onStart: ((displayTitle: String) -> Unit)? = null,
         onDuplicateFound: ((existingFile: File) -> Unit)? = null,
         onSuccess: ((displayTitle: String) -> Unit)? = null,
-        onError: ((displayTitle: String, error: String) -> Unit)? = null
+        onError: ((displayTitle: String, error: String) -> Unit)? = null,
+        onQueued: ((displayTitle: String, queuePosition: Int) -> Unit)? = null
     ) {
-        if (isBusy) {
-            onError?.invoke(title, "Unduhan sedang berjalan, harap tunggu")
-            return
-        }
+        val displayTitle = if (title.isNotBlank()) title else "Lagu ($videoId)"
 
         // Cek duplikat jika tidak dipaksa unduh ulang
         if (!forceDownload && title.isNotBlank()) {
@@ -91,20 +96,65 @@ class SongDownloader(private val context: Context) {
             }
         }
 
+        // Cek apakah item yang sama sudah ada di antrean
+        val alreadyInQueue = queue.any { it.videoId == videoId }
+        if (alreadyInQueue) {
+            onError?.invoke(displayTitle, "Lagu sudah ada di antrean unduhan")
+            return
+        }
+
+        val task = DownloadTask(
+            videoId = videoId,
+            title = title,
+            forceDownload = forceDownload,
+            onStart = onStart,
+            onDuplicateFound = onDuplicateFound,
+            onSuccess = onSuccess,
+            onError = onError
+        )
+
+        synchronized(this) {
+            if (isBusy) {
+                queue.add(task)
+                val position = queue.size
+                onQueued?.invoke(displayTitle, position)
+                return
+            } else {
+                isBusy = true
+                processTask(task)
+            }
+        }
+    }
+
+    private fun processNextInQueue() {
+        synchronized(this) {
+            val nextTask = queue.poll()
+            if (nextTask != null) {
+                isBusy = true
+                processTask(nextTask)
+            } else {
+                isBusy = false
+            }
+        }
+    }
+
+    private fun processTask(task: DownloadTask) {
         val dir = FileUtils.getDownloadDir()
-        val displayTitle = if (title.isNotBlank()) title else "Lagu ($videoId)"
+        val displayTitle = if (task.title.isNotBlank()) task.title else "Lagu (${task.videoId})"
 
-        isBusy = true
-        onStart?.invoke(displayTitle)
+        mainHandler.post {
+            task.onStart?.invoke(displayTitle)
+        }
 
+        val remainingText = if (queue.isNotEmpty()) " [Antrean: ${queue.size}]" else ""
         updateDownloadNotification(
             title = "Mengunduh Lagu",
-            text = "$displayTitle (Menyiapkan...)",
+            text = "$displayTitle (Menyiapkan...)$remainingText",
             progress = -1,
             ongoing = true
         )
 
-        val request = YoutubeDLRequest("https://music.youtube.com/watch?v=$videoId").apply {
+        val request = YoutubeDLRequest("https://music.youtube.com/watch?v=${task.videoId}").apply {
             addOption("-f", "ba")
             addOption("-x")
             addOption("--audio-format", "mp3")
@@ -122,9 +172,10 @@ class SongDownloader(private val context: Context) {
                     if (p != lastProgress) {
                         lastProgress = p
                         val etaText = if (etaInSeconds > 0) " (sisa ${etaInSeconds}s)" else ""
+                        val queueStatus = if (queue.isNotEmpty()) " [Antrean: ${queue.size}]" else ""
                         updateDownloadNotification(
                             title = "Mengunduh: $displayTitle",
-                            text = if (p > 0) "$p%$etaText" else "Memproses audio...",
+                            text = if (p > 0) "$p%$etaText$queueStatus" else "Memproses audio...$queueStatus",
                             progress = p,
                             ongoing = true
                         )
@@ -135,14 +186,13 @@ class SongDownloader(private val context: Context) {
                 val exitCode = response.exitCode
 
                 mainHandler.post {
-                    isBusy = false
                     if (exitCode == 0) {
                         updateDownloadNotification(
                             title = "Unduhan Selesai",
                             text = "$displayTitle tersimpan di offline",
                             isDone = true
                         )
-                        onSuccess?.invoke(displayTitle)
+                        task.onSuccess?.invoke(displayTitle)
                     } else {
                         val errMsg = output?.lines()?.lastOrNull { it.isNotBlank() } ?: "Gagal memproses audio"
                         updateDownloadNotification(
@@ -150,19 +200,20 @@ class SongDownloader(private val context: Context) {
                             text = errMsg,
                             ongoing = false
                         )
-                        onError?.invoke(displayTitle, "Unduh gagal (kode $exitCode): $errMsg")
+                        task.onError?.invoke(displayTitle, "Unduh gagal (kode $exitCode): $errMsg")
                     }
+                    processNextInQueue()
                 }
             } catch (e: Exception) {
                 mainHandler.post {
-                    isBusy = false
                     val errorMsg = e.message ?: "Kesalahan tidak diketahui"
                     updateDownloadNotification(
                         title = "Unduh Gagal",
                         text = errorMsg,
                         ongoing = false
                     )
-                    onError?.invoke(displayTitle, errorMsg)
+                    task.onError?.invoke(displayTitle, errorMsg)
+                    processNextInQueue()
                 }
             }
         }
