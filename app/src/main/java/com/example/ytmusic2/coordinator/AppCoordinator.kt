@@ -62,8 +62,12 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         }
         viewController.setInitialAdStats(savedAdsTotal, savedSecondsTotal)
 
+        val savedDataSaver = initialPrefs.getBoolean("data_saver_enabled", false)
+        viewController.setDataSaverEnabled(savedDataSaver)
+
         // 3. Inisialisasi modul logika & domain
         initModules()
+        webManager.setDataSaverEnabled(savedDataSaver)
 
         // 4. Hubungkan event UI dari ViewController ke orkestrator
         setupViewControllerEvents()
@@ -223,6 +227,16 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         viewController.onOfflineClicked = { showOfflineFiles() }
         viewController.onSleepTimerClicked = { showSleepTimerOptions() }
         viewController.onOfflineCloseClicked = { offlinePlayer.stop() }
+        viewController.onDataSaverToggled = { isEnabled ->
+            val prefs = activity.getSharedPreferences("ytm_prefs", android.content.Context.MODE_PRIVATE)
+            prefs.edit().putBoolean("data_saver_enabled", isEnabled).apply()
+            webManager.setDataSaverEnabled(isEnabled)
+            Toast.makeText(
+                activity,
+                if (isEnabled) "Mode Hemat Kuota Aktif (Video 144p)" else "Mode Hemat Kuota Dinonaktifkan",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
         viewController.onShuffleClicked = {
             val enabled = offlinePlayer.toggleShuffle()
             val text = if (enabled) "Shuffle: Aktif" else "Shuffle: Nonaktif"

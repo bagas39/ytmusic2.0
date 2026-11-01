@@ -18,6 +18,49 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
     var onTitleDetected: ((String) -> Unit)? = null
     var onPageLifecycleInject: (() -> Unit)? = null
 
+    var isDataSaverEnabled: Boolean = false
+        private set
+
+    fun setDataSaverEnabled(enabled: Boolean) {
+        isDataSaverEnabled = enabled
+        applyDataSaver(enabled)
+    }
+
+    private fun applyDataSaver(enabled: Boolean) {
+        val script = """
+            (function() {
+                window._ytmDataSaver = $enabled;
+                var styleId = 'ytm-data-saver-style';
+                var s = document.getElementById(styleId);
+                if ($enabled) {
+                    if (!s) {
+                        s = document.createElement('style');
+                        s.id = styleId;
+                        s.textContent = 'ytmusic-player-page #song-video, ytmusic-player-page .canvas-container, ytmusic-player-page video { opacity: 0.001 !important; }';
+                        (document.head || document.documentElement).appendChild(s);
+                    }
+                    var mp = document.getElementById('movie_player');
+                    if (mp && typeof mp.setPlaybackQualityRange === 'function') {
+                        try {
+                            mp.setPlaybackQualityRange('tiny', 'tiny');
+                            mp.setPlaybackQuality('tiny');
+                        } catch(e) {}
+                    }
+                } else {
+                    if (s && s.parentNode) s.parentNode.removeChild(s);
+                    var mp = document.getElementById('movie_player');
+                    if (mp && typeof mp.setPlaybackQualityRange === 'function') {
+                        try {
+                            mp.setPlaybackQualityRange('auto', 'auto');
+                            mp.setPlaybackQuality('auto');
+                        } catch(e) {}
+                    }
+                }
+            })();
+        """.trimIndent()
+        executeJs(script)
+    }
+
     private val adHosts = arrayOf(
         "googleads.g.doubleclick.net",
         "adservice.google.com",
@@ -266,6 +309,24 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                 }
             } catch (e) {}
 
+            // Injeksi status Mode Hemat Kuota (Data Saver)
+            window._ytmDataSaver = $isDataSaverEnabled;
+            if ($isDataSaverEnabled) {
+                try {
+                    if (!document.getElementById('ytm-data-saver-style')) {
+                        var ds = document.createElement('style');
+                        ds.id = 'ytm-data-saver-style';
+                        ds.textContent = 'ytmusic-player-page #song-video, ytmusic-player-page .canvas-container, ytmusic-player-page video { opacity: 0.001 !important; }';
+                        (document.head || document.documentElement).appendChild(ds);
+                    }
+                    var mp = document.getElementById('movie_player');
+                    if (mp && typeof mp.setPlaybackQualityRange === 'function') {
+                        mp.setPlaybackQualityRange('tiny', 'tiny');
+                        mp.setPlaybackQuality('tiny');
+                    }
+                } catch (e) {}
+            }
+
             // Intercept API /youtubei/v1/player to strip adPlacements at network layer
             if (!window._hasPlayerFetchInterceptor) {
                 window._hasPlayerFetchInterceptor = true;
@@ -405,7 +466,18 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                 });
                 var events = ['loadedmetadata', 'durationchange', 'canplay', 'play', 'playing', 'timeupdate'];
                 events.forEach(function(evt) {
-                    v.addEventListener(evt, skipAdsFast);
+                    v.addEventListener(evt, function() {
+                        skipAdsFast();
+                        if (window._ytmDataSaver && (evt === 'loadedmetadata' || evt === 'canplay' || evt === 'play')) {
+                            var mp = document.getElementById('movie_player');
+                            if (mp && typeof mp.setPlaybackQualityRange === 'function') {
+                                try {
+                                    mp.setPlaybackQualityRange('tiny', 'tiny');
+                                    mp.setPlaybackQuality('tiny');
+                                } catch (e) {}
+                            }
+                        }
+                    });
                 });
             }
 

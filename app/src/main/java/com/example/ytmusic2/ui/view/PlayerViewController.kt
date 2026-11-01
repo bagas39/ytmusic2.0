@@ -34,6 +34,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
@@ -85,7 +87,7 @@ class PlayerViewController(private val rootView: View) {
     private var isShuffleState by mutableStateOf(false)
     private var repeatModeState by mutableStateOf(RepeatMode.OFF)
 
-    // Ad Counter States
+    // Ad Counter & Data Saver States
     private var adSkipPopupVisibleState by mutableStateOf(false)
     private var lastSkippedCountState by mutableIntStateOf(1)
     private var lastSkippedSecondsState by mutableIntStateOf(15)
@@ -93,6 +95,7 @@ class PlayerViewController(private val rootView: View) {
     private var adSkipTotalSecondsState by mutableIntStateOf(0)
     private var adSkipTriggerIdState by mutableIntStateOf(0)
     private var showAdStatsDialogState by mutableStateOf(false)
+    private var dataSaverEnabledState by mutableStateOf(false)
 
     // Hoisted Events / Callbacks
     var onPreviousClicked: (() -> Unit)? = null
@@ -106,6 +109,7 @@ class PlayerViewController(private val rootView: View) {
     var onRepeatClicked: (() -> Unit)? = null
     var onSeekTrackingChanged: ((isTracking: Boolean) -> Unit)? = null
     var onSeekTo: ((progressMs: Int) -> Unit)? = null
+    var onDataSaverToggled: ((Boolean) -> Unit)? = null
 
     val isOfflinePlayerVisible: Boolean
         get() = offlineVisibleState
@@ -595,8 +599,19 @@ class PlayerViewController(private val rootView: View) {
                         }
                     }
 
-                    // Baris Status Minimalis (Hanya tampil jika sudah ada iklan yang dilewati)
-                    if (adSkipTotalCountState > 0 && !adSkipPopupVisibleState) {
+                    // Baris Status Minimalis & Penghemat Data
+                    if (!adSkipPopupVisibleState) {
+                        val statusText = if (adSkipTotalCountState > 0) {
+                            val saverTag = if (dataSaverEnabledState) " · Hemat Data ON" else ""
+                            "$adSkipTotalCountState iklan dilewati · ${formatSavedTime(adSkipTotalSecondsState)} dihemat$saverTag"
+                        } else {
+                            if (dataSaverEnabledState) {
+                                "🛡️ YTM Shield · Mode Hemat Kuota Aktif"
+                            } else {
+                                "🛡️ YTM Shield · Ketuk untuk opsi & hemat data"
+                            }
+                        }
+
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -607,8 +622,8 @@ class PlayerViewController(private val rootView: View) {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "$adSkipTotalCountState iklan dilewati · ${formatSavedTime(adSkipTotalSecondsState)} dihemat",
-                                color = Color(0xFF757582),
+                                text = statusText,
+                                color = if (dataSaverEnabledState) Color(0xFFFF8599) else Color(0xFF757582),
                                 fontSize = 10.5.sp,
                                 fontFamily = FontFamily.Monospace
                             )
@@ -639,28 +654,73 @@ class PlayerViewController(private val rootView: View) {
             shape = RoundedCornerShape(16.dp),
             title = {
                 Text(
-                    text = "Statistik Pemblokir Iklan",
+                    text = "Statistik & Penghemat Data",
                     color = Color(0xFFF1F1F1),
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold
                 )
             },
             text = {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF1F1F27),
-                    border = BorderStroke(1.dp, Color(0xFF2C2C35)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF1F1F27),
+                        border = BorderStroke(1.dp, Color(0xFF2C2C35)),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        StatRow("Iklan dilewati", "$totalAds")
-                        HorizontalDivider(thickness = 0.5.dp, color = Color(0xFF2C2C35))
-                        StatRow("Waktu dihemat", formatSavedTime(totalSeconds))
-                        HorizontalDivider(thickness = 0.5.dp, color = Color(0xFF2C2C35))
-                        StatRow("Estimasi data dihemat", dataSavedMb)
+                        Column(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            StatRow("Iklan dilewati", "$totalAds")
+                            HorizontalDivider(thickness = 0.5.dp, color = Color(0xFF2C2C35))
+                            StatRow("Waktu dihemat", formatSavedTime(totalSeconds))
+                            HorizontalDivider(thickness = 0.5.dp, color = Color(0xFF2C2C35))
+                            StatRow("Estimasi data iklan", dataSavedMb)
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF1F1F27),
+                        border = BorderStroke(1.dp, Color(0xFF2C2C35)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                Text(
+                                    text = "Mode Hemat Kuota",
+                                    color = Color(0xFFF1F1F1),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "Kunci video ke 144p (hemat kuota ~70%) tanpa menurunkan kualitas audio",
+                                    color = Color(0xFF9E9EA8),
+                                    fontSize = 11.sp,
+                                    lineHeight = 14.sp
+                                )
+                            }
+                            Switch(
+                                checked = dataSaverEnabledState,
+                                onCheckedChange = { isChecked ->
+                                    dataSaverEnabledState = isChecked
+                                    onDataSaverToggled?.invoke(isChecked)
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = Color(0xFFFF0033),
+                                    uncheckedThumbColor = Color(0xFF9E9EA8),
+                                    uncheckedTrackColor = Color(0xFF26262E)
+                                )
+                            )
+                        }
                     }
                 }
             }
@@ -762,5 +822,12 @@ class PlayerViewController(private val rootView: View) {
         adSkipTotalCountState = totalSkipped
         adSkipTotalSecondsState = totalSeconds
         adSkipTriggerIdState += 1
+    }
+
+    /**
+     * Mengatur status Mode Hemat Kuota (Data Saver).
+     */
+    fun setDataSaverEnabled(enabled: Boolean) {
+        dataSaverEnabledState = enabled
     }
 }
