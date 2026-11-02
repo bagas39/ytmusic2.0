@@ -1,7 +1,8 @@
 # YTMusic 2.0
 
 <p align="left">
-  <a href="https://github.com/bagas39/ytmusic2.0/releases"><img src="https://img.shields.io/github/v/release/bagas39/ytmusic2.0?color=007ec6&label=Release&logo=github&style=flat-square" alt="Latest Release"></a>
+  <a href="https://github.com/bagas39/ytmusic2.0/releases"><img src="https://img.shields.io/github/v/tag/bagas39/ytmusic2.0?color=007ec6&label=Release&logo=github&style=flat-square" alt="Latest Release"></a>
+  <a href="https://github.com/bagas39/ytmusic2.0/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/bagas39/ytmusic2.0/build.yml?branch=main&label=Build&style=flat-square&logo=githubactions&logoColor=white" alt="Build Status"></a>
   <a href="https://www.gnu.org/licenses/gpl-3.0"><img src="https://img.shields.io/badge/License-GPL%20v3.0-blue?style=flat-square&logo=gnu&logoColor=white" alt="License"></a>
   <a href="https://developer.android.com"><img src="https://img.shields.io/badge/Platform-Android%207.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Platform"></a>
   <a href="https://github.com/bagas39/ytmusic2.0/releases"><img src="https://img.shields.io/github/downloads/bagas39/ytmusic2.0/total?logo=googleplay&logoColor=white&label=Downloads&color=orange&style=flat-square" alt="Downloads"></a>
