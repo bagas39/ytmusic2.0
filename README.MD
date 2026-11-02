@@ -22,10 +22,15 @@ Most mobile browsers and wrapper apps struggle with persistent playback because 
 | Feature / Capability | Official YouTube Music (Free) | Official YouTube Music (Premium) | YTMusic 2.0 |
 | :--- | :---: | :---: | :---: |
 | **Background Playback (Screen Off / Minimized)** | ❌ Pauses immediately | ✅ Included | ✅ **Unrestricted Background Playback (Lifecycle & KeepAlive Bypass)** |
-| **Ad-Free Listening** | ❌ Frequent interruptions | ✅ Ad-free stream | ✅ **Zero-Flicker Interception (Network API & DOM Sanitization)** |
+| **Ad-Free Listening** | ❌ Frequent interruptions | ✅ Ad-free stream | ✅ **Zero-Flicker Interception (Deep Payload & Network Sanitization)** |
+| **Ad-Blocker Stats & Telemetry** | ❌ | ❌ | ✅ **Deep Payload Ad Auditor (1 vs 2 stacked ads, time & data saved)** |
+| **Data Saver (Mode Hemat Kuota)** | ⚠️ Limited | ⚠️ Limited | ✅ **144p Video Stream Locking & Canvas Suppressor (60–80% savings)** |
 | **Local Audio Downloads** | ❌ Not available | ⚠️ DRM-locked cache only | ✅ **Direct MP3 on-device extraction via yt-dlp & FFmpeg** |
-| **Built-in Offline Player** | ❌ | ⚠️ Sandboxed in-app only | ✅ **Interactive Player (Scrubbing SeekBar, Marquee, Notifications)** |
-| **System Notification Controls** | ⚠️ Limited | ✅ Media controls | ✅ **Full MediaStyle Notification (⏮ Prev, ⏯ Play/Pause, Next ⏭)** |
+| **Download Queue (FIFO)** | ❌ | ⚠️ Sequential only | ✅ **Automatic background download queue with progress reporting** |
+| **Built-in Offline Player** | ❌ | ⚠️ Sandboxed in-app only | ✅ **Interactive Player (Scrubbing SeekBar, Shuffle & Repeat modes)** |
+| **System & Wearable Controls** | ⚠️ Limited | ✅ Media controls | ✅ **Full MediaSessionCompat (Smartwatches, TWS buttons, lockscreen)** |
+| **Audio Safeguard (Headphone Disconnect)** | ⚠️ System default | ⚠️ System default | ✅ **Auto-Pause on Disconnect (ACTION_AUDIO_BECOMING_NOISY)** |
+| **Sleep Timer** | ❌ | ⚠️ Sleep timer menu | ✅ **Custom Sleep Timer (Presets + Custom minutes + Live countdown)** |
 | **Login Requirement** | Required for playlists | Required | 🔓 **Optional (Listen anonymously or sign in with your account)** |
 | **Cost & Freedom** | Free with heavy restrictions | Paid monthly subscription | **100% Free & Open Source (GPL-3.0)** |
 
@@ -64,26 +69,29 @@ Most mobile browsers and wrapper apps struggle with persistent playback because 
 app/src/main/java/com/example/ytmusic2/
 ├── MainActivity.kt                      # Minimal Host Container (Delegates lifecycle to coordinator)
 ├── KeepAliveWebView.kt                  # Anti-visibility suppression & Transsion selection fix
-├── MusicBackgroundService.kt            # Foreground Service, CPU WakeLock, MediaStyle Notification
+├── MusicBackgroundService.kt            # Foreground Service, CPU WakeLock, MediaStyle Notification, Audio Becoming Noisy
 │
 ├── coordinator/
 │   └── AppCoordinator.kt                # Central orchestrator connecting UI, Web, Player, and Services
 │
 ├── ui/
 │   ├── view/
-│   │   └── PlayerViewController.kt      # View binding, SeekBar scrubbing, duration ticker, event hoisting
+│   │   └── PlayerViewController.kt      # Hybrid Jetpack Compose Material 3 dock, seekbar, and stats dialog
 │   └── dialog/
-│       └── AppDialogManager.kt          # Dialog manager (Duplicate prompts, offline tracks, file operations)
+│       └── AppDialogManager.kt          # Dialog manager (Sleep timer, duplicate prompts, offline tracks)
 │
 ├── webview/
-│   ├── YtmWebManager.kt                 # Chromium configuration, ad sanitizer, DOM scrapers, JS bridge
+│   ├── YtmWebManager.kt                 # Chromium configuration, ad sanitizer, data saver 144p, JS bridge
+│   ├── AdSkipObserver.kt                # Deep payload inspector (1 vs 2 stacked ads, true duration)
 │   └── SongMetadata.kt                  # Data model for active playback track metadata
 │
 ├── player/
-│   └── OfflinePlayerManager.kt          # Native MediaPlayer controller with SeekBar timer synchronization
+│   ├── OfflinePlayerManager.kt          # Native MediaPlayer controller with SeekBar timer synchronization
+│   └── RepeatMode.kt                    # Enum for repeat states (OFF, ALL, ONE)
 │
 ├── downloader/
-│   └── SongDownloader.kt                # yt-dlp & FFmpeg extraction pipeline with ETA notifications
+│   ├── SongDownloader.kt                # yt-dlp & FFmpeg extraction pipeline with ETA notifications
+│   └── DownloadTask.kt                  # FIFO queue task model
 │
 └── util/
     ├── FileUtils.kt                     # Storage abstraction, intent openers, and folder fallbacks
@@ -128,7 +136,7 @@ This project is developed solely for **educational, academic research, and perso
 ## 🛠 Compilation & Development Setup
 
 1. **Java Development Kit (JDK)**: JDK 17, 21, or 22 configured in `$JAVA_HOME`.
-2. **Android SDK**: Compile SDK `35`, Target SDK `34`, Min SDK `24` (Android 7.0+).
+2. **Android SDK**: Compile SDK `36`, Target SDK `34`, Min SDK `24` (Android 7.0+).
 3. **Build Commands**:
 ```powershell
 # Set Java environment (e.g., on Windows PowerShell)
@@ -140,4 +148,6 @@ $env:JAVA_HOME = "C:\Program Files\Java\jdk-22"
 # Build release APK
 .\gradlew.bat assembleRelease
 ```
-Compiled APK binaries will be generated at: `app/build/outputs/apk/debug/app-debug.apk`.
+Compiled APK binaries will be generated at:
+* Debug APK: `app/build/outputs/apk/debug/app-debug.apk`
+* Release APK: `app/build/outputs/apk/release/app-release-unsigned.apk` (or signed release via Android Studio).
