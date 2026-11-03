@@ -67,7 +67,7 @@ Most mobile browsers and wrapper apps struggle with persistent playback because 
 ## 🏗 Project Architecture & Separation of Concerns (SoC)
 
 ```text
-app/src/main/java/com/example/ytmusic2/
+app/src/main/java/com/bagas39/ytmusic2/
 ├── MainActivity.kt                      # Minimal Host Container (Delegates lifecycle to coordinator)
 ├── KeepAliveWebView.kt                  # Anti-visibility suppression & Transsion selection fix
 ├── MusicBackgroundService.kt            # Foreground Service, CPU WakeLock, MediaStyle Notification, Audio Becoming Noisy

@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.ytmusic2"
+    namespace = "com.bagas39.ytmusic2"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.ytmusic2"
+        applicationId = "com.bagas39.ytmusic2"
         minSdk = 24
         targetSdk = 34
         versionCode = 4

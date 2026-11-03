@@ -6,7 +6,7 @@
     android:orientation="vertical">
 
     <!-- Layar YouTube Music (Murni XML untuk stabilitas penuh WebView & Background Bypass) -->
-    <com.example.ytmusic2.KeepAliveWebView
+    <com.bagas39.ytmusic2.KeepAliveWebView
         android:id="@+id/webViewYoutubeMusic"
         android:layout_width="match_parent"
         android:layout_height="0dp"
