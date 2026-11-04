@@ -18,6 +18,9 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
     var onTitleDetected: ((String) -> Unit)? = null
     var onPageLifecycleInject: (() -> Unit)? = null
 
+    @Volatile
+    private var currentDomVideoId: String? = null
+
     var isDataSaverEnabled: Boolean = false
         private set
 
@@ -102,6 +105,13 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
             fun onTitle(title: String) {
                 if (title.isNotEmpty()) {
                     onTitleDetected?.invoke(title)
+                }
+            }
+
+            @JavascriptInterface
+            fun onVideoId(videoId: String) {
+                if (videoId.isNotBlank()) {
+                    currentDomVideoId = videoId.trim()
                 }
             }
 
@@ -214,7 +224,7 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
         return match?.groupValues?.get(1)
     }
 
-    fun getCurrentVideoId(): String? = extractVideoId(webView.url)
+    fun getCurrentVideoId(): String? = currentDomVideoId?.takeIf { it.isNotBlank() } ?: extractVideoId(webView.url)
 
     fun executeJs(script: String) {
         webView.evaluateJavascript(script, null)
@@ -285,13 +295,30 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                         if (img && img.src) sArt = img.src;
                     }
                 }
+                var sVid = '';
                 var mp = document.getElementById('movie_player');
                 if (mp && typeof mp.getVideoData === 'function') {
                     var vd = mp.getVideoData();
                     if (vd) {
                         if (!sTitle && vd.title) sTitle = vd.title.trim();
                         if (!sArtist && vd.author) sArtist = vd.author.trim();
+                        if (vd.video_id) sVid = vd.video_id.trim();
                     }
+                }
+                if (!sVid && playerBar) {
+                    var linkEl = playerBar.querySelector('a[href*="watch?v="]');
+                    if (linkEl && linkEl.href) {
+                        var mLink = linkEl.href.match(/[?&]v=([\w-]{11})/);
+                        if (mLink) sVid = mLink[1];
+                    }
+                }
+                if (!sVid) {
+                    var mUrl = window.location.href.match(/[?&]v=([\w-]{11})/);
+                    if (mUrl) sVid = mUrl[1];
+                }
+                if (sVid && window.AndroidBridge && window.AndroidBridge.onVideoId) {
+                    window._lastReportedVideoId = sVid;
+                    window.AndroidBridge.onVideoId(sVid);
                 }
                 var v = document.querySelector('video');
                 var isPlay = (v && !v.paused);
@@ -639,12 +666,31 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                             if (imgElem && imgElem.src) sArt = imgElem.src;
                         }
                     }
+                    var sVid = '';
                     var mp = document.getElementById('movie_player');
                     if (mp && typeof mp.getVideoData === 'function') {
                         var vd = mp.getVideoData();
                         if (vd) {
                             if (!sTitle && vd.title) sTitle = vd.title.trim();
                             if (!sArtist && vd.author) sArtist = vd.author.trim();
+                            if (vd.video_id) sVid = vd.video_id.trim();
+                        }
+                    }
+                    if (!sVid && playerBar) {
+                        var linkElem = playerBar.querySelector('a[href*="watch?v="]');
+                        if (linkElem && linkElem.href) {
+                            var mLink = linkElem.href.match(/[?&]v=([\w-]{11})/);
+                            if (mLink) sVid = mLink[1];
+                        }
+                    }
+                    if (!sVid) {
+                        var mUrl = window.location.href.match(/[?&]v=([\w-]{11})/);
+                        if (mUrl) sVid = mUrl[1];
+                    }
+                    if (sVid && sVid !== window._lastReportedVideoId) {
+                        window._lastReportedVideoId = sVid;
+                        if (window.AndroidBridge && window.AndroidBridge.onVideoId) {
+                            window.AndroidBridge.onVideoId(sVid);
                         }
                     }
                     var isPlay = (v && !v.paused);

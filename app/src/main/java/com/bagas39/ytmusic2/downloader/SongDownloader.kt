@@ -62,13 +62,31 @@ class SongDownloader(private val context: Context) {
     fun findDuplicateFile(title: String): File? {
         if (title.isBlank()) return null
         val existingFiles = FileUtils.getOfflineAudioFiles()
-        val cleanTitle = title.replace(Regex("[\\\\/:*?\"<>|]"), "").lowercase().trim()
+
+        fun normalize(raw: String): String {
+            return raw.lowercase()
+                .replace(Regex("[\\\\/:*?\"<>|\u29f8\uff0f\uff1a\uff0a\uff1f\uff02\uff1c\uff1e\uff5c_\\-]+"), " ")
+                .replace(Regex("\\s+"), " ")
+                .trim()
+        }
+
+        fun stripSuffix(raw: String): String {
+            val stripped = raw.replace(
+                Regex("[(\\[](?:official|lyric|lyrics|audio|video|visualizer|music video|mv|hd|hq|remastered)[^)\\]]*[)\\]]", RegexOption.IGNORE_CASE),
+                ""
+            )
+            return normalize(stripped)
+        }
+
+        val normTitle = normalize(title)
+        val coreTitle = stripSuffix(title)
+        if (normTitle.isEmpty()) return null
 
         return existingFiles.firstOrNull { f ->
-            val fName = f.nameWithoutExtension.lowercase().trim()
-            fName == cleanTitle ||
-                (cleanTitle.length >= 4 && fName.contains(cleanTitle)) ||
-                (fName.length >= 4 && cleanTitle.contains(fName))
+            val rawName = f.nameWithoutExtension
+            val normFile = normalize(rawName)
+            val coreFile = stripSuffix(rawName)
+            normFile == normTitle || (coreTitle.isNotEmpty() && coreFile == coreTitle)
         }
     }
 
