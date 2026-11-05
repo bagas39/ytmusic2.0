@@ -32,6 +32,9 @@ class SongDownloader(private val context: Context) {
     var isBusy: Boolean = false
         private set
 
+    @Volatile
+    private var activeVideoId: String? = null
+
     val queueSize: Int
         get() = queue.size
 
@@ -114,13 +117,6 @@ class SongDownloader(private val context: Context) {
             }
         }
 
-        // Cek apakah item yang sama sudah ada di antrean
-        val alreadyInQueue = queue.any { it.videoId == videoId }
-        if (alreadyInQueue) {
-            onError?.invoke(displayTitle, "Lagu sudah ada di antrean unduhan")
-            return
-        }
-
         val task = DownloadTask(
             videoId = videoId,
             title = title,
@@ -132,6 +128,16 @@ class SongDownloader(private val context: Context) {
         )
 
         synchronized(this) {
+            // Cek apakah item yang sama sedang aktif diunduh atau sudah ada di antrean
+            if (activeVideoId == videoId) {
+                onError?.invoke(displayTitle, "Lagu ini sedang dalam proses pengunduhan")
+                return
+            }
+            if (queue.any { it.videoId == videoId }) {
+                onError?.invoke(displayTitle, "Lagu sudah ada di antrean unduhan")
+                return
+            }
+
             if (isBusy) {
                 queue.add(task)
                 val position = queue.size
@@ -139,6 +145,7 @@ class SongDownloader(private val context: Context) {
                 return
             } else {
                 isBusy = true
+                activeVideoId = task.videoId
                 processTask(task)
             }
         }
@@ -149,9 +156,11 @@ class SongDownloader(private val context: Context) {
             val nextTask = queue.poll()
             if (nextTask != null) {
                 isBusy = true
+                activeVideoId = nextTask.videoId
                 processTask(nextTask)
             } else {
                 isBusy = false
+                activeVideoId = null
             }
         }
     }
