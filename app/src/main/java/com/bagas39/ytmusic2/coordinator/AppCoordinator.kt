@@ -10,7 +10,9 @@ import com.bagas39.ytmusic2.KeepAliveWebView
 import com.bagas39.ytmusic2.MusicBackgroundService
 import com.bagas39.ytmusic2.R
 import com.bagas39.ytmusic2.downloader.SongDownloader
+import com.bagas39.ytmusic2.player.AudioQuality
 import com.bagas39.ytmusic2.player.OfflinePlayerManager
+import com.bagas39.ytmusic2.webview.StreamMediaOptimizer
 import com.bagas39.ytmusic2.ui.dialog.AppDialogManager
 import com.bagas39.ytmusic2.ui.view.PlayerViewController
 import com.bagas39.ytmusic2.util.FileUtils
@@ -34,6 +36,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
 
     private lateinit var webManager: YtmWebManager
     private lateinit var adSkipObserver: com.bagas39.ytmusic2.webview.AdSkipObserver
+    private lateinit var streamOptimizer: StreamMediaOptimizer
     private lateinit var offlinePlayer: OfflinePlayerManager
     private lateinit var downloader: SongDownloader
     private lateinit var viewController: PlayerViewController
@@ -65,8 +68,12 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         val savedDataSaver = initialPrefs.getBoolean("data_saver_enabled", false)
         viewController.setDataSaverEnabled(savedDataSaver)
 
+        val savedQualityName = initialPrefs.getString("audio_quality", AudioQuality.AUTO.name)
+        val savedQuality = AudioQuality.fromName(savedQualityName)
+        viewController.setAudioQuality(savedQuality)
+
         // 3. Inisialisasi modul logika & domain
-        initModules()
+        initModules(savedDataSaver, savedQuality)
         webManager.setDataSaverEnabled(savedDataSaver)
 
         // 4. Hubungkan event UI dari ViewController ke orkestrator
@@ -99,9 +106,10 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         }
     }
 
-    private fun initModules() {
+    private fun initModules(initialDataSaver: Boolean, initialQuality: AudioQuality) {
         // Downloader
         downloader = SongDownloader(activity).apply {
+            audioQuality = initialQuality
             init(onInitFailed = { error ->
                 Toast.makeText(activity, "Gagal init yt-dlp: $error", Toast.LENGTH_LONG).show()
             })
@@ -109,6 +117,13 @@ class AppCoordinator(private val activity: AppCompatActivity) {
 
         // Web Manager & Ad Skip Observer (Terisolasi dari bypass engine)
         val webView = activity.findViewById<KeepAliveWebView>(R.id.webViewYoutubeMusic)
+        streamOptimizer = StreamMediaOptimizer(webView).apply {
+            setDataSaverEnabled(initialDataSaver)
+            setAudioQuality(initialQuality)
+        }
+        webView.onWindowFocusChange = { hasFocus ->
+            streamOptimizer.setWindowFocused(hasFocus)
+        }
         adSkipObserver = com.bagas39.ytmusic2.webview.AdSkipObserver(webView).apply {
             onAdsSkipped = { count, durationSeconds ->
                 val prefs = activity.getSharedPreferences("ytm_prefs", android.content.Context.MODE_PRIVATE)
@@ -127,12 +142,15 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         webManager = YtmWebManager(webView).apply {
             onPageLifecycleInject = {
                 adSkipObserver.injectObserverScript()
+                streamOptimizer.injectOptimizerScript()
             }
             onTitleDetected = { title ->
                 currentOnlineTitle = title
+                streamOptimizer.updateTrackTitle(title)
             }
             onSongStateChanged = { metadata ->
                 currentOnlineTitle = metadata.title
+                streamOptimizer.updateTrackTitle(metadata.title)
                 // Jika sedang mode offline dan user memutar lagu di webview YTM:
                 if (offlinePlayer.isOfflineActive) {
                     if (metadata.isPlaying) {
@@ -230,10 +248,22 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         viewController.onDataSaverToggled = { isEnabled ->
             val prefs = activity.getSharedPreferences("ytm_prefs", android.content.Context.MODE_PRIVATE)
             prefs.edit().putBoolean("data_saver_enabled", isEnabled).apply()
+            streamOptimizer.setDataSaverEnabled(isEnabled)
             webManager.setDataSaverEnabled(isEnabled)
             Toast.makeText(
                 activity,
-                if (isEnabled) "Mode Hemat Kuota Aktif (Video 144p)" else "Mode Hemat Kuota Dinonaktifkan",
+                if (isEnabled) "Mode Audio Saja Aktif (Video 144p)" else "Mode Audio Saja Dinonaktifkan",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+        viewController.onAudioQualityChanged = { quality ->
+            val prefs = activity.getSharedPreferences("ytm_prefs", android.content.Context.MODE_PRIVATE)
+            prefs.edit().putString("audio_quality", quality.name).apply()
+            streamOptimizer.setAudioQuality(quality)
+            downloader.audioQuality = quality
+            Toast.makeText(
+                activity,
+                "Kualitas Audio: ${quality.displayName} (${quality.bitrateLabel})",
                 Toast.LENGTH_SHORT
             ).show()
         }
@@ -529,14 +559,26 @@ class AppCoordinator(private val activity: AppCompatActivity) {
     // Lifecycle & Back Handlers
     // ==========================================
 
+    fun onResume() {
+        streamOptimizer.setWindowFocused(activity.hasWindowFocus())
+    }
+
+    fun onWindowFocusChanged(hasFocus: Boolean) {
+        streamOptimizer.setWindowFocused(hasFocus)
+    }
+
     fun onPause() {
+        streamOptimizer.setWindowFocused(false)
         webManager.injectBypassScript()
         adSkipObserver.injectObserverScript()
+        streamOptimizer.injectOptimizerScript()
     }
 
     fun onStop() {
+        streamOptimizer.setWindowFocused(false)
         webManager.injectBypassScript()
         adSkipObserver.injectObserverScript()
+        streamOptimizer.injectOptimizerScript()
     }
 
     fun onDestroy() {

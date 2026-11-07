@@ -60,6 +60,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bagas39.ytmusic2.R
+import com.bagas39.ytmusic2.player.AudioQuality
 import com.bagas39.ytmusic2.player.RepeatMode
 import com.bagas39.ytmusic2.util.FormatUtils
 import kotlinx.coroutines.delay
@@ -96,6 +97,7 @@ class PlayerViewController(private val rootView: View) {
     private var adSkipTriggerIdState by mutableIntStateOf(0)
     private var showAdStatsDialogState by mutableStateOf(false)
     private var dataSaverEnabledState by mutableStateOf(false)
+    private var audioQualityState by mutableStateOf(AudioQuality.AUTO)
 
     // Hoisted Events / Callbacks
     var onPreviousClicked: (() -> Unit)? = null
@@ -110,6 +112,7 @@ class PlayerViewController(private val rootView: View) {
     var onSeekTrackingChanged: ((isTracking: Boolean) -> Unit)? = null
     var onSeekTo: ((progressMs: Int) -> Unit)? = null
     var onDataSaverToggled: ((Boolean) -> Unit)? = null
+    var onAudioQualityChanged: ((AudioQuality) -> Unit)? = null
 
     val isOfflinePlayerVisible: Boolean
         get() = offlineVisibleState
@@ -602,11 +605,11 @@ class PlayerViewController(private val rootView: View) {
                     // Baris Status Minimalis & Penghemat Data
                     if (!adSkipPopupVisibleState) {
                         val statusText = if (adSkipTotalCountState > 0) {
-                            val saverTag = if (dataSaverEnabledState) " · Hemat Data ON" else ""
+                            val saverTag = if (dataSaverEnabledState) " · Audio Saja ON" else ""
                             "$adSkipTotalCountState iklan dilewati · ${formatSavedTime(adSkipTotalSecondsState)} dihemat$saverTag"
                         } else {
                             if (dataSaverEnabledState) {
-                                "🛡️ YTM Shield · Mode Hemat Kuota Aktif"
+                                "🛡️ YTM Shield · Mode Audio Saja Aktif"
                             } else {
                                 "🛡️ YTM Shield · Ketuk untuk opsi & hemat data"
                             }
@@ -695,7 +698,7 @@ class PlayerViewController(private val rootView: View) {
                         ) {
                             Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                                 Text(
-                                    text = "Mode Hemat Kuota",
+                                    text = "Mode Audio Saja",
                                     color = Color(0xFFF1F1F1),
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.SemiBold
@@ -720,6 +723,75 @@ class PlayerViewController(private val rootView: View) {
                                     uncheckedTrackColor = Color(0xFF26262E)
                                 )
                             )
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF1F1F27),
+                        border = BorderStroke(1.dp, Color(0xFF2C2C35)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Column {
+                                Text(
+                                    text = "Kualitas Audio",
+                                    color = Color(0xFFF1F1F1),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "Berlaku untuk streaming online dan unduhan offline",
+                                    color = Color(0xFF9E9EA8),
+                                    fontSize = 11.sp
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                AudioQuality.entries.forEach { q ->
+                                    val isSelected = audioQualityState == q
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = if (isSelected) Color(0xFFFF0033) else Color(0xFF26262E),
+                                        border = BorderStroke(
+                                            1.dp,
+                                            if (isSelected) Color(0xFFFF4D6D) else Color(0xFF383842)
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable {
+                                                audioQualityState = q
+                                                onAudioQualityChanged?.invoke(q)
+                                            }
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(vertical = 7.dp, horizontal = 2.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text(
+                                                text = q.displayName,
+                                                color = if (isSelected) Color.White else Color(0xFFD1D1D6),
+                                                fontSize = 10.5.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                maxLines = 1
+                                            )
+                                            Text(
+                                                text = q.bitrateLabel,
+                                                color = if (isSelected) Color(0xFFFFD1D9) else Color(0xFF888892),
+                                                fontSize = 8.sp,
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -829,5 +901,9 @@ class PlayerViewController(private val rootView: View) {
      */
     fun setDataSaverEnabled(enabled: Boolean) {
         dataSaverEnabledState = enabled
+    }
+
+    fun setAudioQuality(quality: AudioQuality) {
+        audioQualityState = quality
     }
 }

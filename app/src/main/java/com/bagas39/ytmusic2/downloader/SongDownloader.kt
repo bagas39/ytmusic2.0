@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import androidx.core.app.NotificationCompat
 import com.bagas39.ytmusic2.MainActivity
+import com.bagas39.ytmusic2.player.AudioQuality
 import com.bagas39.ytmusic2.util.FileUtils
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
@@ -34,6 +35,9 @@ class SongDownloader(private val context: Context) {
 
     @Volatile
     private var activeVideoId: String? = null
+
+    @Volatile
+    var audioQuality: AudioQuality = AudioQuality.AUTO
 
     val queueSize: Int
         get() = queue.size
@@ -182,9 +186,11 @@ class SongDownloader(private val context: Context) {
         )
 
         val request = YoutubeDLRequest("https://music.youtube.com/watch?v=${task.videoId}").apply {
-            addOption("-f", "ba")
+            val formatSpec = if (audioQuality == AudioQuality.LOW) "ba[abr<=96]/ba" else "ba"
+            addOption("-f", formatSpec)
             addOption("-x")
             addOption("--audio-format", "mp3")
+            addOption("--audio-quality", audioQuality.ytDlpQuality)
             addOption("--embed-thumbnail")
             addOption("--add-metadata")
             addOption("--no-playlist")

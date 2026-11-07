@@ -27,6 +27,16 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    override fun onResume() {
+        super.onResume()
+        coordinator.onResume()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        coordinator.onWindowFocusChanged(hasFocus)
+    }
+
     override fun onPause() {
         super.onPause()
         coordinator.onPause()

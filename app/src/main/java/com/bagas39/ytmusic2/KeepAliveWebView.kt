@@ -13,6 +13,8 @@ class KeepAliveWebView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : WebView(context, attrs, defStyleAttr) {
 
+    var onWindowFocusChange: ((Boolean) -> Unit)? = null
+
     init {
         isFocusable = true
         isFocusableInTouchMode = true
@@ -32,6 +34,11 @@ class KeepAliveWebView @JvmOverloads constructor(
 
     override fun dispatchWindowVisibilityChanged(visibility: Int) {
         super.dispatchWindowVisibilityChanged(View.VISIBLE)
+    }
+
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        onWindowFocusChange?.invoke(hasWindowFocus)
     }
 
     // Blokir ActionMode (TextSelection / FloatingToolbar) agar sentuhan tidak diserap oleh menu teks
