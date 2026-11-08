@@ -13,6 +13,20 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            val refreshRate = display?.mode?.refreshRate ?: 60.0f
+            window.attributes = window.attributes.apply {
+                preferredRefreshRate = refreshRate
+            }
+        }
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            window.colorMode = android.content.pm.ActivityInfo.COLOR_MODE_DEFAULT
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            window.setDesiredHdrHeadroom(1.0f)
+        }
+
         coordinator = AppCoordinator(this)
         coordinator.onCreate()
 

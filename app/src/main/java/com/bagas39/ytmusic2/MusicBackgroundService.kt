@@ -84,7 +84,7 @@ class MusicBackgroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        defaultArtworkBitmap = BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher)
+        defaultArtworkBitmap = BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher)?.let { sanitizeBitmap(it) }
         createNotificationChannel()
         initMediaSession()
         acquireWakeLock()
@@ -289,14 +289,36 @@ class MusicBackgroundService : Service() {
                 null
             }
 
+            val sanitized = bitmap?.let { sanitizeBitmap(it) }
+
             mainHandler.post {
                 if (source == currentArtworkUrl) {
-                    currentArtworkBitmap = bitmap
+                    currentArtworkBitmap = sanitized
                     updateMediaSessionState()
                     refreshNotification()
                 }
             }
         }
+    }
+
+    private fun sanitizeBitmap(raw: Bitmap): Bitmap {
+        val maxDim = 512
+        val w = raw.width
+        val h = raw.height
+        val scale = if (w > maxDim || h > maxDim) {
+            maxDim.toFloat() / maxOf(w, h)
+        } else {
+            1.0f
+        }
+        val targetW = (w * scale).toInt().coerceAtLeast(1)
+        val targetH = (h * scale).toInt().coerceAtLeast(1)
+        val clean = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(clean)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
+        val srcRect = android.graphics.Rect(0, 0, w, h)
+        val dstRect = android.graphics.Rect(0, 0, targetW, targetH)
+        canvas.drawBitmap(raw, srcRect, dstRect, paint)
+        return clean
     }
 
     private fun refreshNotification() {
