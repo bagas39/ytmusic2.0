@@ -106,17 +106,20 @@ class StreamMediaOptimizer(private val webView: WebView) {
                             '}' +
                             '.ytm-viz-bar {' +
                             '  width: 3px;' +
-                            '  height: 4px;' +
+                            '  height: var(--bar-peak, 32px);' +
                             '  background-color: rgba(255, 255, 255, 0.82);' +
                             '  border-radius: 99px;' +
-                            '  transition: height 0.25s ease, opacity 0.25s ease;' +
+                            '  transform: scaleY(0.08);' +
+                            '  transform-origin: center;' +
+                            '  will-change: transform, opacity;' +
+                            '  transition: transform 0.25s ease, opacity 0.25s ease;' +
                             '}' +
                             '#ytm-visualizer-overlay.is-playing .ytm-viz-bar {' +
                             '  transition: none !important;' +
                             '  animation: ytmSpectrum 0.85s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate;' +
                             '}' +
                             '#ytm-visualizer-overlay.is-paused .ytm-viz-bar {' +
-                            '  height: 4px !important;' +
+                            '  transform: scaleY(0.08) !important;' +
                             '  opacity: 0.28;' +
                             '  animation: none !important;' +
                             '}' +
@@ -130,9 +133,9 @@ class StreamMediaOptimizer(private val webView: WebView) {
                             '  text-align: center;' +
                             '}' +
                             '@keyframes ytmSpectrum {' +
-                            '  0% { height: 5px; opacity: 0.4; }' +
-                            '  50% { height: calc(var(--bar-peak, 32px) * 0.55); opacity: 0.72; }' +
-                            '  100% { height: var(--bar-peak, 32px); opacity: 0.9; }' +
+                            '  0% { transform: scaleY(0.1); opacity: 0.4; }' +
+                            '  50% { transform: scaleY(0.55); opacity: 0.72; }' +
+                            '  100% { transform: scaleY(1.0); opacity: 0.9; }' +
                             '}';
                         (document.head || document.documentElement).appendChild(s);
                     }
