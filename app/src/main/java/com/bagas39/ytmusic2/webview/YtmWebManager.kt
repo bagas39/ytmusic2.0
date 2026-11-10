@@ -236,31 +236,71 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
     }
 
     fun clickPrevious() {
-        executeJs("var b = document.querySelector('.previous-button') || document.querySelector('#previous-button'); if(b) b.click();")
+        executeJs(
+            """
+            window._ytmUserIntentPlaying = true;
+            window._ytmUnexpectedPauseStart = 0;
+            var b = document.querySelector('.previous-button') || document.querySelector('#previous-button');
+            if (b) b.click();
+            """.trimIndent()
+        )
     }
 
     fun clickPlayPause() {
         executeJs(
             """
+            var v = document.querySelector('video');
+            var isCurrentlyPlaying = !!(v && !v.paused);
+            window._ytmUserIntentPlaying = !isCurrentlyPlaying;
+            if (!isCurrentlyPlaying) {
+                window._ytmUnexpectedPauseStart = 0;
+            }
             var btn = document.querySelector('#play-pause-button') || document.querySelector('.play-pause-button');
-            if (btn) { btn.click(); } else {
-                var v = document.querySelector('video');
-                if (v) { v.paused ? v.play() : v.pause(); }
+            if (btn) {
+                btn.click();
+            } else if (v) {
+                isCurrentlyPlaying ? v.pause() : v.play();
             }
             """.trimIndent()
         )
     }
 
     fun clickNext() {
-        executeJs("var b = document.querySelector('.next-button') || document.querySelector('#next-button'); if(b) b.click();")
+        executeJs(
+            """
+            window._ytmUserIntentPlaying = true;
+            window._ytmUnexpectedPauseStart = 0;
+            var b = document.querySelector('.next-button') || document.querySelector('#next-button');
+            if (b) b.click();
+            """.trimIndent()
+        )
     }
 
     fun pausePlayback() {
-        executeJs("var v = document.querySelector('video'); if (v) v.pause();")
+        executeJs(
+            """
+            window._ytmUserIntentPlaying = false;
+            var v = document.querySelector('video');
+            if (v) v.pause();
+            """.trimIndent()
+        )
     }
 
     fun resumePlayback() {
-        executeJs("var v = document.querySelector('video'); if (v && v.paused) v.play();")
+        executeJs(
+            """
+            window._ytmUserIntentPlaying = true;
+            window._ytmUnexpectedPauseStart = 0;
+            var v = document.querySelector('video');
+            if (v && v.paused) {
+                try { v.play(); } catch(e) {}
+            }
+            var mp = document.getElementById('movie_player');
+            if (mp && typeof mp.playVideo === 'function') {
+                try { mp.playVideo(); } catch(e) {}
+            }
+            """.trimIndent()
+        )
     }
 
     fun seekTo(positionMs: Long) {
@@ -326,7 +366,11 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                     window.AndroidBridge.onVideoId(sVid);
                 }
                 var v = document.querySelector('video');
-                var isPlay = (v && !v.paused);
+                var actualPlaying = !!(v && !v.paused);
+                if (actualPlaying) {
+                    window._ytmUserIntentPlaying = true;
+                }
+                var isPlay = actualPlaying || (window._ytmUserIntentPlaying && (Date.now() - (window._ytmUnexpectedPauseStart || 0) < 3000));
                 var durMs = (v && v.duration && isFinite(v.duration)) ? Math.round(v.duration * 1000) : 0;
                 var posMs = (v && v.currentTime && isFinite(v.currentTime)) ? Math.round(v.currentTime * 1000) : 0;
                 if (sTitle && window.AndroidBridge && window.AndroidBridge.onSongState) {
@@ -445,6 +489,33 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                 window.addEventListener('pagehide', function(e) { e.stopImmediatePropagation(); }, true);
             } catch (e) {}
 
+            // User Intent Playback Watchdog: status niat putar pengguna
+            window._ytmUserIntentPlaying = (typeof window._ytmUserIntentPlaying === 'boolean') ? window._ytmUserIntentPlaying : false;
+            window._ytmUnexpectedPauseStart = window._ytmUnexpectedPauseStart || 0;
+            window._ytmLastReviveTime = window._ytmLastReviveTime || 0;
+
+            // Tangkap klik langsung user pada tombol play/pause di web UI
+            if (!window._ytmUserClickCaptured) {
+                window._ytmUserClickCaptured = true;
+                document.addEventListener('click', function(e) {
+                    var target = e.target;
+                    if (!target) return;
+                    var playPauseBtn = target.closest('#play-pause-button, .play-pause-button');
+                    if (playPauseBtn && e.isTrusted) {
+                        var v = document.querySelector('video');
+                        var currentlyPlaying = !!(v && !v.paused);
+                        if (currentlyPlaying) {
+                            window._ytmUserIntentPlaying = false;
+                            console.log('[YTM-BYPASS] User explicitly paused via web UI click');
+                        } else {
+                            window._ytmUserIntentPlaying = true;
+                            window._ytmUnexpectedPauseStart = 0;
+                            console.log('[YTM-BYPASS] User explicitly played via web UI click');
+                        }
+                    }
+                }, true);
+            }
+
             // Fast skip ad function & RAF loop
             var _fastSkipRaf = null;
             function skipAdsFast() {
@@ -504,13 +575,222 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                 }
             }
 
+            function isElementActive(el) {
+                if (!el) return false;
+                // Chromium Android WebView meniadakan layout (offsetParent=null, width=0, height=0) saat background/layar mati.
+                // Jangan gunakan offsetParent / offsetWidth / offsetHeight sebagai penentu visibilitas!
+                if (el.hidden) return false;
+                if (el.getAttribute('aria-hidden') === 'true') return false;
+                if (typeof el.opened === 'boolean' && !el.opened) return false;
+                if (el.hasAttribute('opened') && el.getAttribute('opened') === 'false') return false;
+                if (el.disabled || el.hasAttribute('disabled')) return false;
+                try {
+                    var style = window.getComputedStyle ? window.getComputedStyle(el) : el.style;
+                    if (style && (style.display === 'none' || style.visibility === 'hidden')) {
+                        return false;
+                    }
+                } catch (e) {}
+                return true;
+            }
+
+            function dismissPromos() {
+                var dismissRegex = /\b(close|dismiss|not now|no,? thanks|maybe later|later|skip|skip trial|stay on web|continue in browser|tutup|lain kali|tidak,? terima kasih|jangan sekarang|nanti|nanti saja|lewati|lewati uji coba|abaikan|tetap di web|lanjutkan di browser)\b/i;
+                var avoidRegex = /\b(open app|open in app|get the app|install|try it free|subscribe|upgrade|buka aplikasi|buka di aplikasi|dapatkan aplikasi|instal|coba gratis|langganan|beli)\b/i;
+
+                var dismiss = document.querySelector(
+                    'tp-yt-paper-dialog button[aria-label="Close"], ' +
+                    'ytmusic-dialog button[aria-label="Close"], ' +
+                    'tp-yt-paper-dialog button[aria-label="Tutup"], ' +
+                    'ytmusic-dialog button[aria-label="Tutup"], ' +
+                    'button[aria-label="Dismiss"], ' +
+                    'button[aria-label="Tutup"]'
+                );
+                if (dismiss && isElementActive(dismiss)) {
+                    try {
+                        dismiss.click();
+                        console.log('[YTM-BYPASS] Dialog close button clicked');
+                    } catch (e) {}
+                } else {
+                    var dialogs = document.querySelectorAll('tp-yt-paper-dialog, ytmusic-dialog, ytmusic-mealbar-promo-renderer');
+                    dialogs.forEach(function(dlg) {
+                        if (dlg.querySelector('ytmusic-you-there-renderer')) {
+                            return;
+                        }
+                        var isOpen = dlg.tagName.toLowerCase() === 'ytmusic-mealbar-promo-renderer'
+                            ? isElementActive(dlg)
+                            : (dlg.open || dlg.hasAttribute('open') || isElementActive(dlg));
+                        if (isOpen) {
+                            var btns = dlg.querySelectorAll('button, tp-yt-paper-button, yt-button-renderer');
+                            for (var i = 0; i < btns.length; i++) {
+                                var btn = btns[i];
+                                if (!isElementActive(btn)) continue;
+                                var label = ((btn.getAttribute('aria-label') || '') + ' ' + (btn.textContent || '')).trim();
+                                if (avoidRegex.test(label)) continue;
+                                if (dismissRegex.test(label)) {
+                                    try {
+                                        btn.click();
+                                        console.log('[YTM-BYPASS] dialog DISMISSED via regex: ' + label);
+                                    } catch (e) {}
+                                    break;
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+
+            var _lastYouThereTime = 0;
+            function checkYouThere() {
+                var youThere = document.querySelector('ytmusic-you-there-renderer');
+                if (!youThere) return false;
+
+                var parentDlg = youThere.closest('tp-yt-paper-dialog, ytmusic-dialog, [role="dialog"]');
+                if (parentDlg) {
+                    if (parentDlg.getAttribute('aria-hidden') === 'true') return false;
+                    if (parentDlg.style.display === 'none') return false;
+                    if (typeof parentDlg.opened === 'boolean' && !parentDlg.opened) return false;
+                }
+
+                var now = Date.now();
+                if (now - _lastYouThereTime > 1200) {
+                    _lastYouThereTime = now;
+                    console.log('[YTM-BYPASS] you-there PROMPT FOUND. Dismissing...');
+
+                    var confirmBtn = youThere.querySelector(
+                        'yt-button-renderer[dialog-confirm] button, ' +
+                        '[dialog-confirm], ' +
+                        '#confirm-button button, ' +
+                        '#confirm-button, ' +
+                        'tp-yt-paper-button, ' +
+                        'button[role="button"], ' +
+                        'button'
+                    );
+
+                    if (confirmBtn) {
+                        try {
+                            confirmBtn.click();
+                            console.log('[YTM-BYPASS] you-there CONFIRMED via button click');
+                        } catch (e) {
+                            console.log('[YTM-BYPASS] you-there button click err: ' + e);
+                        }
+                    } else if (parentDlg && typeof parentDlg.close === 'function') {
+                        try {
+                            parentDlg.close();
+                            console.log('[YTM-BYPASS] you-there parent dialog closed directly');
+                        } catch (e) {}
+                    }
+
+                    revivePlayback('you-there confirmed');
+                    return true;
+                }
+                return false;
+            }
+
+            function revivePlayback(reason) {
+                if (!window._ytmUserIntentPlaying) return;
+                console.log('[YTM-BYPASS] revivePlayback called: ' + reason);
+
+                var v = document.querySelector('video');
+                var mp = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+
+                // 1. Bersihkan popup dialog yang memblokir pemutaran
+                checkYouThere();
+                dismissPromos();
+
+                // 2. Bangunkan Web AudioContext jika tersuspensi
+                try {
+                    if (window._ytmAudioCtx && window._ytmAudioCtx.state === 'suspended') {
+                        window._ytmAudioCtx.resume();
+                    }
+                } catch (e) {}
+
+                // 3. Fallback 1: HTML5 video play()
+                if (v && v.paused) {
+                    try {
+                        var p = v.play();
+                        if (p && typeof p.catch === 'function') {
+                            p.catch(function(err) {
+                                console.log('[YTM-BYPASS] v.play() catch: ' + err + ', fallback to movie_player');
+                                if (mp && typeof mp.playVideo === 'function') {
+                                    try { mp.playVideo(); } catch (e) {}
+                                }
+                            });
+                        }
+                    } catch (e) {}
+                }
+
+                // 4. Fallback 2: YouTube player API
+                if (mp && typeof mp.playVideo === 'function') {
+                    try {
+                        if (typeof mp.getPlayerState === 'function' && mp.getPlayerState() !== 1) {
+                            mp.playVideo();
+                        }
+                    } catch (e) {}
+                }
+
+                // 5. Fallback 3: Retri bertahap di 200ms jika masih jeda
+                setTimeout(function() {
+                    if (!window._ytmUserIntentPlaying) return;
+                    var v2 = document.querySelector('video');
+                    if (v2 && v2.paused) {
+                        console.log('[YTM-BYPASS] Still paused after 200ms, trying UI click & retry...');
+                        var playBtn = document.querySelector('#play-pause-button, .play-pause-button');
+                        if (playBtn) {
+                            try { playBtn.click(); } catch (e) {}
+                        }
+                        if (mp && typeof mp.playVideo === 'function') {
+                            try { mp.playVideo(); } catch (e) {}
+                        }
+                        if (v2 && v2.paused) {
+                            try { v2.play(); } catch (e) {}
+                        }
+                    }
+                }, 200);
+
+                // 6. Fallback 4: Retri bertahap di 600ms
+                setTimeout(function() {
+                    if (!window._ytmUserIntentPlaying) return;
+                    var v3 = document.querySelector('video');
+                    if (v3 && v3.paused) {
+                        console.log('[YTM-BYPASS] Still paused after 600ms, final retry...');
+                        checkYouThere();
+                        dismissPromos();
+                        if (v3 && v3.paused) {
+                            try { v3.play(); } catch (e) {}
+                        }
+                        if (mp && typeof mp.playVideo === 'function') {
+                            try { mp.playVideo(); } catch (e) {}
+                        }
+                    }
+                }, 600);
+            }
+
             function setupVideoHooks(v) {
                 if (!v || v._hasFastSkipHooks) return;
                 v._hasFastSkipHooks = true;
                 v.addEventListener('ended', function() {
+                    window._ytmUserIntentPlaying = true;
+                    window._ytmUnexpectedPauseStart = 0;
                     var nextBtn = document.querySelector('.next-button') || document.querySelector('#next-button');
                     if (nextBtn) { nextBtn.click(); }
                 });
+
+                v.addEventListener('play', function() {
+                    window._ytmUserIntentPlaying = true;
+                    window._ytmUnexpectedPauseStart = 0;
+                });
+                v.addEventListener('playing', function() {
+                    window._ytmUserIntentPlaying = true;
+                    window._ytmUnexpectedPauseStart = 0;
+                });
+
+                v.addEventListener('pause', function() {
+                    if (window._ytmUserIntentPlaying) {
+                        console.log('[YTM-BYPASS] Video pause event detected while userIntentPlaying=true! Triggering watchdog...');
+                        revivePlayback('video.onpause');
+                    }
+                });
+
                 var events = ['loadedmetadata', 'durationchange', 'canplay', 'play', 'playing', 'timeupdate'];
                 events.forEach(function(evt) {
                     v.addEventListener(evt, function() {
@@ -532,62 +812,13 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
 
             setupVideoHooks(document.querySelector('video'));
 
-            var _lastYouThereTime = 0;
-            function isElementVisible(el) {
-                if (!el) return false;
-                if (el.offsetParent === null && el.offsetWidth === 0 && el.offsetHeight === 0) return false;
-                var style = window.getComputedStyle ? window.getComputedStyle(el) : null;
-                if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) return false;
-                return true;
-            }
-
-            function checkYouThere() {
-                var youThere = document.querySelector('ytmusic-you-there-renderer');
-                if (!youThere) return;
-
-                // Pastikan dialog benar-benar aktif/terlihat, bukan elemen dorman yang di-cache di DOM
-                var parentDlg = youThere.closest('tp-yt-paper-dialog, ytmusic-dialog, [role="dialog"]');
-                if (parentDlg) {
-                    if (parentDlg.getAttribute('aria-hidden') === 'true') return;
-                    if (parentDlg.style.display === 'none') return;
-                    if (typeof parentDlg.opened === 'boolean' && !parentDlg.opened) return;
-                    if (!isElementVisible(parentDlg)) return;
-                }
-
-                if (!isElementVisible(youThere)) return;
-
-                var confirmBtn = youThere.querySelector('yt-button-renderer[dialog-confirm] button, [dialog-confirm], tp-yt-paper-button, button');
-                if (!confirmBtn || !isElementVisible(confirmBtn)) return;
-
-                var now = Date.now();
-                if (now - _lastYouThereTime > 1500) {
-                    _lastYouThereTime = now;
-                    try {
-                        confirmBtn.click();
-                        console.log('[YTM-BYPASS] you-there CONFIRMED');
-                    } catch (e) {}
-
-                    setTimeout(function() {
-                        var v = document.querySelector('video');
-                        if (v && v.paused) {
-                            try {
-                                v.play();
-                                console.log('[YTM-BYPASS] you-there AUTO-RESUMED playback');
-                            } catch (e) {
-                                var pBtn = document.querySelector('#play-pause-button, .play-pause-button');
-                                if (pBtn) try { pBtn.click(); } catch (err) {}
-                            }
-                        }
-                    }, 250);
-                }
-            }
-
-            // MutationObserver untuk deteksi kelas ad-showing dan elemen iklan/dialog secara instant (0ms)
+            // MutationObserver untuk deteksi kelas ad-showing dan elemen dialog secara instant (0ms)
             if (!window._ytmAdObserver) {
                 try {
                     window._ytmAdObserver = new MutationObserver(function() {
                         skipAdsFast();
                         checkYouThere();
+                        dismissPromos();
                     });
                     window._ytmAdObserver.observe(document.body || document.documentElement, {
                         childList: true,
@@ -606,46 +837,21 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                 setupVideoHooks(v);
                 skipAdsFast();
                 checkYouThere();
+                dismissPromos();
 
-                // Premium upsell / dialog -> tutup menggunakan Regex teks Indonesia & Inggris
-                var dismissRegex = /\b(close|dismiss|not now|no,? thanks|maybe later|later|skip|skip trial|stay on web|continue in browser|tutup|lain kali|tidak,? terima kasih|jangan sekarang|nanti|nanti saja|lewati|lewati uji coba|abaikan|tetap di web|lanjutkan di browser)\b/i;
-                var avoidRegex = /\b(open app|open in app|get the app|install|try it free|subscribe|upgrade|buka aplikasi|buka di aplikasi|dapatkan aplikasi|instal|coba gratis|langganan|beli)\b/i;
-
-                var dismiss = document.querySelector(
-                    'tp-yt-paper-dialog button[aria-label="Close"], ' +
-                    'ytmusic-dialog button[aria-label="Close"], ' +
-                    'tp-yt-paper-dialog button[aria-label="Tutup"], ' +
-                    'ytmusic-dialog button[aria-label="Tutup"], ' +
-                    'button[aria-label="Dismiss"], ' +
-                    'button[aria-label="Tutup"]'
-                );
-                if (dismiss && isElementVisible(dismiss)) {
-                    dismiss.click();
-                } else {
-                    var dialogs = document.querySelectorAll('tp-yt-paper-dialog, ytmusic-dialog, ytmusic-mealbar-promo-renderer');
-                    dialogs.forEach(function(dlg) {
-                        // Jangan sentuh jika ini dialog you-there (sudah di-handle checkYouThere agar tidak double-click)
-                        if (dlg.querySelector('ytmusic-you-there-renderer')) {
-                            return;
-                        }
-                        var isOpen = dlg.tagName.toLowerCase() === 'ytmusic-mealbar-promo-renderer'
-                            ? isElementVisible(dlg)
-                            : (dlg.open || dlg.hasAttribute('open') || isElementVisible(dlg));
-                        if (isOpen) {
-                            var btns = dlg.querySelectorAll('button, tp-yt-paper-button, yt-button-renderer');
-                            for (var i = 0; i < btns.length; i++) {
-                                var btn = btns[i];
-                                if (!isElementVisible(btn)) continue;
-                                var label = ((btn.getAttribute('aria-label') || '') + ' ' + (btn.textContent || '')).trim();
-                                if (avoidRegex.test(label)) continue;
-                                if (dismissRegex.test(label)) {
-                                    btn.click();
-                                    console.log('[YTM-BYPASS] dialog DISMISSED via regex: ' + label);
-                                    break;
-                                }
-                            }
-                        }
-                    });
+                // Autonomous Watchdog: Jika user berniat memutar lagu tapi video paused
+                if (window._ytmUserIntentPlaying && v && v.paused) {
+                    var nowPause = Date.now();
+                    if (!window._ytmUnexpectedPauseStart) {
+                        window._ytmUnexpectedPauseStart = nowPause;
+                    }
+                    var pausedMs = nowPause - window._ytmUnexpectedPauseStart;
+                    if (pausedMs > 200 && (!window._ytmLastReviveTime || (nowPause - window._ytmLastReviveTime > 800))) {
+                        window._ytmLastReviveTime = nowPause;
+                        revivePlayback('watchdog (' + pausedMs + 'ms)');
+                    }
+                } else if (v && !v.paused) {
+                    window._ytmUnexpectedPauseStart = 0;
                 }
 
                 // Laporkan metadata dan status pemutaran lagu ke MediaSession Android
@@ -703,7 +909,15 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                             window.AndroidBridge.onVideoId(sVid);
                         }
                     }
-                    var isPlay = (v && !v.paused);
+
+                    var actualPlaying = !!(v && !v.paused);
+                    if (actualPlaying) {
+                        window._ytmUserIntentPlaying = true;
+                    }
+                    // Invariant protection: Jangan biarkan MediaSession turun ke STATE_PAUSED
+                    // saat watchdog sedang memulihkan jeda tak terduga (< 3000ms)
+                    var isPlay = actualPlaying || (window._ytmUserIntentPlaying && (Date.now() - (window._ytmUnexpectedPauseStart || 0) < 3000));
+
                     var durMs = (v && v.duration && isFinite(v.duration)) ? Math.round(v.duration * 1000) : 0;
                     var posMs = (v && v.currentTime && isFinite(v.currentTime)) ? Math.round(v.currentTime * 1000) : 0;
                     var nowMs = Date.now();
