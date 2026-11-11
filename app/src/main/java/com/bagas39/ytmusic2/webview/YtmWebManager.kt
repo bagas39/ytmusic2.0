@@ -89,6 +89,7 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
             !isInput
         }
         webView.isHapticFeedbackEnabled = false
+        WebView.setWebContentsDebuggingEnabled(true)
 
         val settings = webView.settings
         settings.javaScriptEnabled = true
@@ -149,9 +150,7 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
         webView.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
                 val msg = consoleMessage?.message() ?: return false
-                if (msg.contains("[YTM-BYPASS]")) {
-                    Log.d("YTM-BYPASS", msg)
-                }
+                Log.d("YTM-CONSOLE", msg)
                 return false
             }
         }
@@ -639,6 +638,66 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                 }
             }
 
+            var _lastPrevClickTime = 0;
+            function injectPrevButton() {
+                var playPauseBtns = Array.from(document.querySelectorAll('#play-pause-button-mweb, #play-pause-button, .play-pause-button'));
+                for (var i = 0; i < playPauseBtns.length; i++) {
+                    var pp = playPauseBtns[i];
+                    var parent = pp.parentNode;
+                    if (!parent) continue;
+                    if (parent.querySelector('.ytm-custom-prev-btn')) continue;
+
+                    var prevBtn = document.createElement('button');
+                    prevBtn.className = 'ytm-custom-prev-btn';
+                    prevBtn.setAttribute('aria-label', 'Previous track');
+                    prevBtn.setAttribute('title', 'Lagu Sebelumnya');
+                    prevBtn.style.cssText = 'background: transparent; border: none; outline: none; padding: 6px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 50%; color: #ffffff; vertical-align: middle; margin-right: 2px; -webkit-tap-highlight-color: transparent; flex-shrink: 0;';
+
+                    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                    svg.setAttribute('viewBox', '0 0 24 24');
+                    svg.style.cssText = 'width: 24px; height: 24px; fill: currentColor; pointer-events: none;';
+
+                    var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                    path.setAttribute('d', 'M6 6h2v12H6zm3.5 6l8.5 6V6z');
+                    svg.appendChild(path);
+                    prevBtn.appendChild(svg);
+
+                    prevBtn.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        console.log('[YTM-BYPASS] Injected Prev button clicked');
+                        window._ytmUserIntentPlaying = true;
+                        window._ytmUnexpectedPauseStart = 0;
+
+                        var now = Date.now();
+                        var isDouble = (now - _lastPrevClickTime < 1000);
+                        _lastPrevClickTime = now;
+
+                        var v = document.querySelector('video');
+                        var origPrev = document.querySelector('#previous-button, .previous-button');
+                        var mp = document.getElementById('movie_player');
+
+                        if (!isDouble && v && v.currentTime > 3) {
+                            v.currentTime = 0;
+                            return;
+                        }
+
+                        if (origPrev) {
+                            try { origPrev.click(); return; } catch (err) {}
+                        }
+                        if (mp && typeof mp.previousVideo === 'function') {
+                            try { mp.previousVideo(); return; } catch (err) {}
+                        }
+                        if (v) {
+                            v.currentTime = 0;
+                        }
+                    });
+
+                    parent.insertBefore(prevBtn, pp);
+                    console.log('[YTM-BYPASS] Injected Prev button placed before ' + (pp.id || pp.className));
+                }
+            }
+
             var _lastYouThereTime = 0;
             function checkYouThere() {
                 var youThere = document.querySelector('ytmusic-you-there-renderer');
@@ -811,12 +870,14 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
             }
 
             setupVideoHooks(document.querySelector('video'));
+            injectPrevButton();
 
-            // MutationObserver untuk deteksi kelas ad-showing dan elemen dialog secara instant (0ms)
+            // MutationObserver untuk deteksi kelas ad-showing, tombol Prev, dan elemen dialog secara instant (0ms)
             if (!window._ytmAdObserver) {
                 try {
                     window._ytmAdObserver = new MutationObserver(function() {
                         skipAdsFast();
+                        injectPrevButton();
                         checkYouThere();
                         dismissPromos();
                     });
@@ -835,6 +896,7 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
             window._ytmBypassInterval = setInterval(function() {
                 var v = document.querySelector('video');
                 setupVideoHooks(v);
+                injectPrevButton();
                 skipAdsFast();
                 checkYouThere();
                 dismissPromos();

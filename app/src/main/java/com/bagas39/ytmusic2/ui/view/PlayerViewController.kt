@@ -12,6 +12,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,12 +47,14 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.text.font.FontFamily
@@ -175,6 +178,8 @@ class PlayerViewController(private val rootView: View) {
             }
         }
 
+        var isDockExpanded by remember { mutableStateOf(true) }
+
         Surface(
             modifier = Modifier.fillMaxWidth(),
             color = obsidianBg
@@ -193,12 +198,69 @@ class PlayerViewController(private val rootView: View) {
                     color = Color(0xFF26262E)
                 )
 
-                // Notifikasi Ringan Saat Iklan Dilewati (Selaras dengan Tema Obsidian & Crimson)
+                // Drag & Slide Handle Bar (Ketuk atau geser untuk menyembunyikan/menampilkan dock kontrol)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .pointerInput(Unit) {
+                            detectVerticalDragGestures { _, dragAmount ->
+                                if (dragAmount > 12) {
+                                    isDockExpanded = false
+                                } else if (dragAmount < -12) {
+                                    isDockExpanded = true
+                                }
+                            }
+                        }
+                        .clickable { isDockExpanded = !isDockExpanded }
+                        .padding(vertical = if (isDockExpanded) 6.dp else 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(if (isDockExpanded) 36.dp else 32.dp)
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(if (isDockExpanded) Color(0xFF40404C) else ytmCrimsonLight)
+                        )
+                        if (!isDockExpanded) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "▲ Buka Menu Kontrol",
+                                color = Color(0xFFB0B0BE),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+
+                // Konten Dock yang bisa di-slide (Collapsible via AnimatedVisibility)
                 AnimatedVisibility(
-                    visible = adSkipPopupVisibleState,
+                    visible = isDockExpanded,
                     enter = expandVertically() + fadeIn(),
                     exit = shrinkVertically() + fadeOut()
                 ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .pointerInput(Unit) {
+                                detectVerticalDragGestures { _, dragAmount ->
+                                    if (dragAmount > 20) {
+                                        isDockExpanded = false
+                                    }
+                                }
+                            }
+                    ) {
+                        // Notifikasi Ringan Saat Iklan Dilewati (Selaras dengan Tema Obsidian & Crimson)
+                        AnimatedVisibility(
+                            visible = adSkipPopupVisibleState,
+                            enter = expandVertically() + fadeIn(),
+                            exit = shrinkVertically() + fadeOut()
+                        ) {
                     val skipLabel = if (lastSkippedCountState > 1) {
                         "${lastSkippedCountState} iklan bertumpuk dilewati (${lastSkippedSecondsState}d)"
                     } else {
@@ -437,85 +499,88 @@ class PlayerViewController(private val rootView: View) {
                     }
                 }
 
-                // Area Tombol Navigasi & Aksi Cepat (Grid 3-Kolom Simetris)
+                // Area Tombol Navigasi & Aksi Cepat (Grid Simetris)
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Baris 1: Kontrol Utama (Prev, Play/Pause, Next)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedButton(
-                            onClick = { onPreviousClicked?.invoke() },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(44.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                containerColor = elevatedPill,
-                                contentColor = Color.White
-                            ),
-                            border = BorderStroke(1.dp, subtleBorder),
-                            contentPadding = PaddingValues(horizontal = 8.dp)
+                    // Kontrol Navigasi Media: HANYA ditampilkan saat mode Offline aktif!
+                    // Saat mode Online, navigasi Prev/Play/Next sudah ada langsung di player bar YouTube Music.
+                    if (offlineVisibleState) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "⏮  Prev",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
+                            OutlinedButton(
+                                onClick = { onPreviousClicked?.invoke() },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = elevatedPill,
+                                    contentColor = Color.White
+                                ),
+                                border = BorderStroke(1.dp, subtleBorder),
+                                contentPadding = PaddingValues(horizontal = 8.dp)
+                            ) {
+                                Text(
+                                    text = "⏮  Prev",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
 
-                        Button(
-                            onClick = { onPlayPauseClicked?.invoke() },
-                            modifier = Modifier
-                                .weight(1.35f)
-                                .height(46.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = ytmCrimson,
-                                contentColor = Color.White
-                            ),
-                            elevation = ButtonDefaults.buttonElevation(
-                                defaultElevation = 4.dp,
-                                pressedElevation = 1.dp
-                            ),
-                            contentPadding = PaddingValues(horizontal = 10.dp)
-                        ) {
-                            Text(
-                                text = playPauseLabelState,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
-                            )
-                        }
+                            Button(
+                                onClick = { onPlayPauseClicked?.invoke() },
+                                modifier = Modifier
+                                    .weight(1.35f)
+                                    .height(46.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = ytmCrimson,
+                                    contentColor = Color.White
+                                ),
+                                elevation = ButtonDefaults.buttonElevation(
+                                    defaultElevation = 4.dp,
+                                    pressedElevation = 1.dp
+                                ),
+                                contentPadding = PaddingValues(horizontal = 10.dp)
+                            ) {
+                                Text(
+                                    text = playPauseLabelState,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
 
-                        OutlinedButton(
-                            onClick = { onNextClicked?.invoke() },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(44.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                containerColor = elevatedPill,
-                                contentColor = Color.White
-                            ),
-                            border = BorderStroke(1.dp, subtleBorder),
-                            contentPadding = PaddingValues(horizontal = 8.dp)
-                        ) {
-                            Text(
-                                text = "Next  ⏭",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                            OutlinedButton(
+                                onClick = { onNextClicked?.invoke() },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = elevatedPill,
+                                    contentColor = Color.White
+                                ),
+                                border = BorderStroke(1.dp, subtleBorder),
+                                contentPadding = PaddingValues(horizontal = 8.dp)
+                            ) {
+                                Text(
+                                    text = "Next  ⏭",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
                     }
 
-                    // Baris 2: Aksi Cepat (Unduh, Offline, Sleep Timer — 3 Kolom Seimbang)
+                    // Baris Aksi Cepat: Unduh, Offline, Sleep Timer (3 Kolom Seimbang)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -526,7 +591,7 @@ class PlayerViewController(private val rootView: View) {
                             onClick = { onDownloadClicked?.invoke() },
                             modifier = Modifier
                                 .weight(1f)
-                                .height(40.dp),
+                                .height(42.dp),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.outlinedButtonColors(
                                 containerColor = Color(0xFF17171D),
@@ -552,7 +617,7 @@ class PlayerViewController(private val rootView: View) {
                             onClick = { onOfflineClicked?.invoke() },
                             modifier = Modifier
                                 .weight(1f)
-                                .height(40.dp),
+                                .height(42.dp),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.outlinedButtonColors(
                                 containerColor = offlineActiveBg,
@@ -584,7 +649,7 @@ class PlayerViewController(private val rootView: View) {
                             onClick = { onSleepTimerClicked?.invoke() },
                             modifier = Modifier
                                 .weight(1f)
-                                .height(40.dp),
+                                .height(42.dp),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.outlinedButtonColors(
                                 containerColor = timerBg,
@@ -635,6 +700,8 @@ class PlayerViewController(private val rootView: View) {
                 }
             }
         }
+    }
+}
     }
 
     @Composable
