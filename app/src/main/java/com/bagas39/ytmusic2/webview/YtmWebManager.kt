@@ -89,7 +89,8 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
             !isInput
         }
         webView.isHapticFeedbackEnabled = false
-        WebView.setWebContentsDebuggingEnabled(true)
+        val isDebuggable = (webView.context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        WebView.setWebContentsDebuggingEnabled(isDebuggable)
 
         val settings = webView.settings
         settings.javaScriptEnabled = true
@@ -237,10 +238,43 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
     fun clickPrevious() {
         executeJs(
             """
-            window._ytmUserIntentPlaying = true;
-            window._ytmUnexpectedPauseStart = 0;
-            var b = document.querySelector('.previous-button') || document.querySelector('#previous-button');
-            if (b) b.click();
+            (function() {
+                if (typeof window._ytmSkipToPreviousTrack === 'function') {
+                    window._ytmSkipToPreviousTrack();
+                    return;
+                }
+                window._ytmUserIntentPlaying = true;
+                window._ytmUnexpectedPauseStart = 0;
+                var queue = document.querySelector('ytmusic-player-queue');
+                if (queue) {
+                    var items = Array.from(queue.querySelectorAll('ytmusic-player-queue-item'));
+                    var selectedIdx = items.findIndex(function(it) { return it.hasAttribute('selected'); });
+                    if (selectedIdx > 0) {
+                        var prevItem = items[selectedIdx - 1];
+                        var clickTarget = prevItem.querySelector('.song-info, .song-title, a') || prevItem;
+                        clickTarget.click();
+                        return;
+                    }
+                }
+                var fsPrev = document.querySelector('ytmusic-player-controls .previous-button button, ytmusic-player-controls .previous-button');
+                if (fsPrev) {
+                    var v = document.querySelector('video');
+                    if (v && v.currentTime > 0.5) v.currentTime = 0;
+                    fsPrev.click();
+                    return;
+                }
+                var mp = document.getElementById('movie_player');
+                if (mp && typeof mp.previousVideo === 'function') {
+                    try {
+                        var v2 = document.querySelector('video');
+                        if (v2 && v2.currentTime > 0.5) v2.currentTime = 0;
+                        mp.previousVideo();
+                        return;
+                    } catch(e) {}
+                }
+                var vFallback = document.querySelector('video');
+                if (vFallback) vFallback.currentTime = 0;
+            })();
             """.trimIndent()
         )
     }
@@ -638,11 +672,68 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                 }
             }
 
-            var _lastPrevClickTime = 0;
+            window._ytmSkipToPreviousTrack = function() {
+                window._ytmUserIntentPlaying = true;
+                window._ytmUnexpectedPauseStart = 0;
+
+                // 1. Antrean lagu di ytmusic-player-queue (paling presisi dan instan di mobile web)
+                var queue = document.querySelector('ytmusic-player-queue');
+                if (queue) {
+                    var items = Array.from(queue.querySelectorAll('ytmusic-player-queue-item'));
+                    var selectedIdx = items.findIndex(function(it) { return it.hasAttribute('selected'); });
+                    if (selectedIdx > 0) {
+                        var prevItem = items[selectedIdx - 1];
+                        var clickTarget = prevItem.querySelector('.song-info, .song-title, a') || prevItem;
+                        clickTarget.click();
+                        console.log('[YTM-BYPASS] Skipped to previous track via queue index: ' + (selectedIdx - 1));
+                        return true;
+                    }
+                }
+
+                // 2. Tombol native previous di ytmusic-player-controls (full-screen player controls)
+                var fsPrev = document.querySelector('ytmusic-player-controls .previous-button button, ytmusic-player-controls .previous-button');
+                if (fsPrev) {
+                    var v = document.querySelector('video');
+                    if (v && v.currentTime > 0.5) v.currentTime = 0;
+                    fsPrev.click();
+                    console.log('[YTM-BYPASS] Skipped to previous track via fsPrev');
+                    return true;
+                }
+
+                // 3. API player movie_player.previousVideo()
+                var mp = document.getElementById('movie_player');
+                if (mp && typeof mp.previousVideo === 'function') {
+                    try {
+                        var v2 = document.querySelector('video');
+                        if (v2 && v2.currentTime > 0.5) v2.currentTime = 0;
+                        mp.previousVideo();
+                        console.log('[YTM-BYPASS] Skipped to previous track via mp.previousVideo()');
+                        return true;
+                    } catch(e) {}
+                }
+
+                // Fallback jika tidak ada lagu sebelumnya (index 0): rewind lagu ke awal
+                var vFallback = document.querySelector('video');
+                if (vFallback) {
+                    vFallback.currentTime = 0;
+                    console.log('[YTM-BYPASS] No previous track in queue, rewound to start');
+                }
+                return false;
+            };
+
             function injectPrevButton() {
-                var playPauseBtns = Array.from(document.querySelectorAll('#play-pause-button-mweb, #play-pause-button, .play-pause-button'));
+                // Pastikan tidak ada tombol injeksi di full-screen player page (karena di sana tombol Prev native sudah ada)
+                var strays = document.querySelectorAll('ytmusic-player-page .ytm-custom-prev-btn, ytmusic-player-controls .ytm-custom-prev-btn, #top-player-bar .ytm-custom-prev-btn');
+                for (var s = 0; s < strays.length; s++) {
+                    strays[s].remove();
+                }
+
+                // Injeksi HANYA pada mini-player bar mobile web yang belum memiliki tombol Previous
+                var playPauseBtns = Array.from(document.querySelectorAll('#right-controls-mweb #play-pause-button-mweb'));
                 for (var i = 0; i < playPauseBtns.length; i++) {
                     var pp = playPauseBtns[i];
+                    if (pp.closest('ytmusic-player-page, ytmusic-player-controls, #top-player-bar')) continue;
+
                     var parent = pp.parentNode;
                     if (!parent) continue;
                     if (parent.querySelector('.ytm-custom-prev-btn')) continue;
@@ -666,35 +757,11 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                         e.preventDefault();
                         e.stopPropagation();
                         console.log('[YTM-BYPASS] Injected Prev button clicked');
-                        window._ytmUserIntentPlaying = true;
-                        window._ytmUnexpectedPauseStart = 0;
-
-                        var now = Date.now();
-                        var isDouble = (now - _lastPrevClickTime < 1000);
-                        _lastPrevClickTime = now;
-
-                        var v = document.querySelector('video');
-                        var origPrev = document.querySelector('#previous-button, .previous-button');
-                        var mp = document.getElementById('movie_player');
-
-                        if (!isDouble && v && v.currentTime > 3) {
-                            v.currentTime = 0;
-                            return;
-                        }
-
-                        if (origPrev) {
-                            try { origPrev.click(); return; } catch (err) {}
-                        }
-                        if (mp && typeof mp.previousVideo === 'function') {
-                            try { mp.previousVideo(); return; } catch (err) {}
-                        }
-                        if (v) {
-                            v.currentTime = 0;
-                        }
+                        window._ytmSkipToPreviousTrack();
                     });
 
                     parent.insertBefore(prevBtn, pp);
-                    console.log('[YTM-BYPASS] Injected Prev button placed before ' + (pp.id || pp.className));
+                    console.log('[YTM-BYPASS] Injected Prev button placed in mini-player bar before ' + (pp.id || pp.className));
                 }
             }
 
