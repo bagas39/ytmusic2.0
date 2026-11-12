@@ -252,7 +252,11 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                     if (selectedIdx > 0) {
                         var prevItem = items[selectedIdx - 1];
                         var clickTarget = prevItem.querySelector('.song-info, .song-title, a') || prevItem;
-                        clickTarget.click();
+                        try {
+                            var evt = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
+                            clickTarget.dispatchEvent(evt);
+                        } catch(e) {}
+                        try { clickTarget.click(); } catch(e) {}
                         return;
                     }
                 }
@@ -260,7 +264,11 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                 if (fsPrev) {
                     var v = document.querySelector('video');
                     if (v && v.currentTime > 0.5) v.currentTime = 0;
-                    fsPrev.click();
+                    try {
+                        var evt2 = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
+                        fsPrev.dispatchEvent(evt2);
+                    } catch(e) {}
+                    try { fsPrev.click(); } catch(e) {}
                     return;
                 }
                 var mp = document.getElementById('movie_player');
@@ -427,6 +435,22 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                                     '.ad-showing video { opacity: 0 !important; } ' +
                                     '.ad-showing .video-ads, .ad-showing .ytp-ad-module, .ytp-ad-player-overlay, .ytp-ad-overlay-container, .ytp-ad-message-container, .ytp-ad-text { display: none !important; }';
                     (document.head || document.documentElement).appendChild(s);
+                }
+                if (!document.getElementById('ytm-miniplayer-fix-style')) {
+                    var ms = document.createElement('style');
+                    ms.id = 'ytm-miniplayer-fix-style';
+                    ms.textContent = 'ytmusic-app-layout[player-page-open] > ytmusic-player-bar, ' +
+                                    'ytmusic-app-layout[player-ui-state="PLAYER_PAGE_OPEN"] > ytmusic-player-bar, ' +
+                                    'ytmusic-player-page[player-page-open] ~ ytmusic-player-bar { visibility: hidden !important; display: none !important; pointer-events: none !important; } ' +
+                                    'ytmusic-player-page:not([player-page-open]) { visibility: hidden !important; pointer-events: none !important; } ' +
+                                    'ytmusic-player-page:not([player-page-open]) * { pointer-events: none !important; } ' +
+                                    'ytmusic-player-page:not([player-page-open]) #ytm-visualizer-overlay, ' +
+                                    'ytmusic-app-layout:not([player-page-open]) #ytm-visualizer-overlay { visibility: hidden !important; display: none !important; pointer-events: none !important; } ' +
+                                    'ytmusic-app-layout:not([player-page-open]) > ytmusic-player-bar { z-index: 1000 !important; visibility: visible !important; pointer-events: auto !important; } ' +
+                                    'ytmusic-app-layout:not([player-page-open]) > ytmusic-player-bar #right-controls-mweb { z-index: 1001 !important; pointer-events: auto !important; overflow: visible !important; } ' +
+                                    '.ytm-custom-prev-btn { position: relative !important; z-index: 1002 !important; pointer-events: auto !important; touch-action: manipulation !important; user-select: none !important; -webkit-user-select: none !important; transition: transform 0.1s ease, background 0.1s ease; } ' +
+                                    '.ytm-custom-prev-btn:active { transform: scale(0.85) !important; background: rgba(255, 255, 255, 0.2) !important; }';
+                    (document.head || document.documentElement).appendChild(ms);
                 }
             } catch (e) {}
 
@@ -684,7 +708,11 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                     if (selectedIdx > 0) {
                         var prevItem = items[selectedIdx - 1];
                         var clickTarget = prevItem.querySelector('.song-info, .song-title, a') || prevItem;
-                        clickTarget.click();
+                        try {
+                            var evt = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
+                            clickTarget.dispatchEvent(evt);
+                        } catch(e) {}
+                        try { clickTarget.click(); } catch(e) {}
                         console.log('[YTM-BYPASS] Skipped to previous track via queue index: ' + (selectedIdx - 1));
                         return true;
                     }
@@ -695,7 +723,11 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                 if (fsPrev) {
                     var v = document.querySelector('video');
                     if (v && v.currentTime > 0.5) v.currentTime = 0;
-                    fsPrev.click();
+                    try {
+                        var evt2 = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
+                        fsPrev.dispatchEvent(evt2);
+                    } catch(e) {}
+                    try { fsPrev.click(); } catch(e) {}
                     console.log('[YTM-BYPASS] Skipped to previous track via fsPrev');
                     return true;
                 }
@@ -739,10 +771,11 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                     if (parent.querySelector('.ytm-custom-prev-btn')) continue;
 
                     var prevBtn = document.createElement('button');
+                    prevBtn.type = 'button';
                     prevBtn.className = 'ytm-custom-prev-btn';
                     prevBtn.setAttribute('aria-label', 'Previous track');
                     prevBtn.setAttribute('title', 'Lagu Sebelumnya');
-                    prevBtn.style.cssText = 'background: transparent; border: none; outline: none; padding: 6px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 50%; color: #ffffff; vertical-align: middle; margin-right: 2px; -webkit-tap-highlight-color: transparent; flex-shrink: 0;';
+                    prevBtn.style.cssText = 'background: transparent; border: none; outline: none; padding: 6px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 50%; color: #ffffff; vertical-align: middle; margin-right: 2px; -webkit-tap-highlight-color: transparent; flex-shrink: 0; position: relative; z-index: 1002; pointer-events: auto; touch-action: manipulation;';
 
                     var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
                     svg.setAttribute('viewBox', '0 0 24 24');
@@ -752,6 +785,11 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                     path.setAttribute('d', 'M6 6h2v12H6zm3.5 6l8.5 6V6z');
                     svg.appendChild(path);
                     prevBtn.appendChild(svg);
+
+                    var stopTouch = function(e) { e.stopPropagation(); };
+                    prevBtn.addEventListener('touchstart', stopTouch, { passive: true });
+                    prevBtn.addEventListener('pointerdown', stopTouch, { passive: true });
+                    prevBtn.addEventListener('touchend', stopTouch, { passive: true });
 
                     prevBtn.addEventListener('click', function(e) {
                         e.preventDefault();

@@ -86,7 +86,6 @@ class StreamMediaOptimizer(private val webView: WebView) {
                             '  width: 100%;' +
                             '  height: 100%;' +
                             '  display: none;' +
-                            '  visibility: visible !important;' +
                             '  flex-direction: column;' +
                             '  align-items: center;' +
                             '  justify-content: center;' +
@@ -95,6 +94,17 @@ class StreamMediaOptimizer(private val webView: WebView) {
                             '  pointer-events: none !important;' +
                             '  user-select: none;' +
                             '  box-sizing: border-box;' +
+                            '}' +
+                            'ytmusic-app-layout:not([player-page-open]) #ytm-visualizer-overlay,' +
+                            'ytmusic-app-layout[player-ui-state="INACTIVE"] #ytm-visualizer-overlay,' +
+                            'ytmusic-player-page:not([player-page-open]) #ytm-visualizer-overlay {' +
+                            '  display: none !important;' +
+                            '  visibility: hidden !important;' +
+                            '  pointer-events: none !important;' +
+                            '}' +
+                            'ytmusic-app-layout[player-page-open] ytmusic-player-page[player-page-open] #ytm-visualizer-overlay,' +
+                            'ytmusic-app-layout[player-ui-state="PLAYER_PAGE_OPEN"] ytmusic-player-page[player-page-open] #ytm-visualizer-overlay {' +
+                            '  visibility: visible !important;' +
                             '}' +
                             '.ytm-viz-bars {' +
                             '  display: flex;' +
@@ -207,6 +217,20 @@ class StreamMediaOptimizer(private val webView: WebView) {
                         return;
                     }
 
+                    var layout = document.querySelector('ytmusic-app-layout');
+                    var playerPage = document.querySelector('ytmusic-player-page');
+                    var isPageOpen = !!((layout && (layout.hasAttribute('player-page-open') || layout.getAttribute('player-ui-state') === 'PLAYER_PAGE_OPEN')) ||
+                                        (playerPage && playerPage.hasAttribute('player-page-open')));
+
+                    // Jika full player tidak dibuka (misal diminimize ke mini player atau di halaman playlist/home),
+                    // sembunyikan visualizer overlay agar tidak nyangkut.
+                    if (!isPageOpen) {
+                        if (existing) {
+                            existing.style.display = 'none';
+                        }
+                        return;
+                    }
+
                     if (window._ytmWindowFocused === false) {
                         if (existing && existing.className !== 'is-paused') {
                             existing.className = 'is-paused';
@@ -214,10 +238,22 @@ class StreamMediaOptimizer(private val webView: WebView) {
                         return;
                     }
 
-                    var v = document.querySelector('ytmusic-player-page video') || document.querySelector('video');
+                    var v = (playerPage ? playerPage.querySelector('video') : null) || document.querySelector('video');
+                    var hasActiveMedia = !!(v && (v.currentSrc || v.src) && v.readyState >= 1 && !v.error);
+                    var songVideo = playerPage ? playerPage.querySelector('#song-video') : null;
+                    if (!playerPage || !songVideo || !hasActiveMedia) {
+                        if (existing) existing.style.display = 'none';
+                        return;
+                    }
 
-                    // Fast-path: jika visualizer sudah terpasang rapi di DOM yang aktif,
-                    // cukup sinkronkan status play/pause tanpa memicu forced layout reflow (getBoundingClientRect).
+                    var svStyle = window.getComputedStyle(songVideo);
+                    var svRect = songVideo.getBoundingClientRect();
+                    if (svStyle.display === 'none' || svStyle.visibility === 'hidden' || svRect.width < 40 || svRect.height < 40) {
+                        if (existing) existing.style.display = 'none';
+                        return;
+                    }
+
+                    // Fast-path: jika visualizer sudah terpasang rapi di DOM yang aktif dan memenuhi kondisi tampilan
                     if (existing && existing.parentElement && existing.parentElement.isConnected && existing.style.display !== 'none') {
                         var isPlaying = !!(v && !v.paused && !v.ended);
                         var targetClass = isPlaying ? 'is-playing' : 'is-paused';
@@ -229,25 +265,6 @@ class StreamMediaOptimizer(private val webView: WebView) {
                         if (metaEl && metaEl.textContent !== expectedMeta) {
                             metaEl.textContent = expectedMeta;
                         }
-                        return;
-                    }
-
-                    var playerPage = document.querySelector('ytmusic-player-page');
-                    var songVideo = playerPage ? playerPage.querySelector('#song-video') : null;
-                    if (!v) {
-                        v = (playerPage ? playerPage.querySelector('video') : null) || document.querySelector('video');
-                    }
-
-                    var hasActiveMedia = !!(v && (v.currentSrc || v.src) && v.readyState >= 1);
-                    if (!playerPage || !songVideo || !hasActiveMedia) {
-                        if (existing) existing.style.display = 'none';
-                        return;
-                    }
-
-                    var svStyle = window.getComputedStyle(songVideo);
-                    var svRect = songVideo.getBoundingClientRect();
-                    if (svStyle.display === 'none' || svRect.width < 40 || svRect.height < 40) {
-                        if (existing) existing.style.display = 'none';
                         return;
                     }
 
@@ -317,10 +334,36 @@ class StreamMediaOptimizer(private val webView: WebView) {
                     if (existing.className !== targetClass) {
                         existing.className = targetClass;
                     }
+
+                    if (v && !v._hasVizListeners) {
+                        v._hasVizListeners = true;
+                        var triggerSync = function() {
+                            if (window._ytmSyncVisualizerDom) window._ytmSyncVisualizerDom();
+                        };
+                        v.addEventListener('play', triggerSync);
+                        v.addEventListener('pause', triggerSync);
+                        v.addEventListener('ended', triggerSync);
+                        v.addEventListener('emptied', triggerSync);
+                    }
                 }
 
                 window._ytmSyncVisualizerDom = syncVisualizerDom;
                 syncVisualizerDom();
+
+                if (!window._hasVisualizerObserver) {
+                    window._hasVisualizerObserver = true;
+                    var obs = new MutationObserver(function() {
+                        if (window._ytmSyncVisualizerDom) {
+                            window._ytmSyncVisualizerDom();
+                        }
+                    });
+                    var targetLayout = document.querySelector('ytmusic-app-layout') || document.body;
+                    obs.observe(targetLayout, { attributes: true, attributeFilter: ['player-page-open', 'player-ui-state'] });
+                    var pp = document.querySelector('ytmusic-player-page');
+                    if (pp) {
+                        obs.observe(pp, { attributes: true, attributeFilter: ['player-page-open', 'player-page-ui-state', 'video-mode'] });
+                    }
+                }
 
                 if (!window._hasVisualizerSyncInterval) {
                     window._hasVisualizerSyncInterval = true;
