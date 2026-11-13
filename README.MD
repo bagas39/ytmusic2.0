@@ -25,7 +25,9 @@ Most mobile browsers and wrapper apps struggle with persistent playback because 
 | **Background Playback (Screen Off / Minimized)** | ❌ Pauses immediately | ✅ Included | ✅ **Unrestricted Background Playback (Lifecycle & KeepAlive Bypass)** |
 | **Ad-Free Listening** | ❌ Frequent interruptions | ✅ Ad-free stream | ✅ **Zero-Flicker Interception (Deep Payload & Network Sanitization)** |
 | **Ad-Blocker Stats & Telemetry** | ❌ | ❌ | ✅ **Deep Payload Ad Auditor (1 vs 2 stacked ads, time & data saved)** |
-| **Data Saver (Mode Hemat Kuota)** | ⚠️ Limited | ⚠️ Limited | ✅ **144p Video Stream Locking & Canvas Suppressor (60–80% savings)** |
+| **Data Saver (Mode Hemat Kuota)** | ⚠️ Limited | ⚠️ Limited | ✅ **Menghemat kuota internet hingga 80% dengan mematikan beban video, digantikan animasi gelombang musik yang ringan dan hemat baterai** |
+| **Mini Player Navigation** | ⚠️ Play/Pause & Next only | ⚠️ Play/Pause & Next only | ✅ **Tombol Previous (`⏮`) diinjeksi langsung ke mini player mweb dengan navigasi antrean instan** |
+| **Audio Quality Selector** | ⚠️ Fixed 128 kbps | ✅ Up to 256 kbps | ✅ **Pemilih bitrate multi-tingkat (Auto, Rendah 48k, Normal 128k, Tinggi 256k) untuk streaming & unduhan** |
 | **Local Audio Downloads** | ❌ Not available | ⚠️ DRM-locked cache only | ✅ **Direct MP3 on-device extraction via yt-dlp & FFmpeg** |
 | **Download Queue (FIFO)** | ❌ | ⚠️ Sequential only | ✅ **Automatic background download queue with progress reporting** |
 | **Built-in Offline Player** | ❌ | ⚠️ Sandboxed in-app only | ✅ **Interactive Player (Scrubbing SeekBar, Shuffle & Repeat modes)** |

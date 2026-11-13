@@ -11,8 +11,8 @@ android {
         applicationId = "com.bagas39.ytmusic2"
         minSdk = 24
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.2.0"
+        versionCode = 5
+        versionName = "1.2.1"
 
         ndk {
             abiFilters += listOf("x86", "x86_64", "armeabi-v7a", "arm64-v8a")
