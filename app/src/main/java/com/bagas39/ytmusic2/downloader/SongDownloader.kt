@@ -8,8 +8,10 @@ import android.content.Intent
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.bagas39.ytmusic2.MainActivity
+import com.bagas39.ytmusic2.lyrics.LyricsRepository
 import com.bagas39.ytmusic2.player.AudioQuality
 import com.bagas39.ytmusic2.util.FileUtils
 import com.yausername.ffmpeg.FFmpeg
@@ -103,10 +105,12 @@ class SongDownloader(private val context: Context) {
     fun downloadSong(
         videoId: String,
         title: String,
+        artist: String = "",
         forceDownload: Boolean = false,
         onStart: ((displayTitle: String) -> Unit)? = null,
         onDuplicateFound: ((existingFile: File) -> Unit)? = null,
         onSuccess: ((displayTitle: String) -> Unit)? = null,
+        onPartialSuccess: ((displayTitle: String, savedFileName: String, warning: String) -> Unit)? = null,
         onError: ((displayTitle: String, error: String) -> Unit)? = null,
         onQueued: ((displayTitle: String, queuePosition: Int) -> Unit)? = null
     ) {
@@ -124,10 +128,12 @@ class SongDownloader(private val context: Context) {
         val task = DownloadTask(
             videoId = videoId,
             title = title,
+            artist = artist,
             forceDownload = forceDownload,
             onStart = onStart,
             onDuplicateFound = onDuplicateFound,
             onSuccess = onSuccess,
+            onPartialSuccess = onPartialSuccess,
             onError = onError
         )
 
@@ -185,12 +191,14 @@ class SongDownloader(private val context: Context) {
             ongoing = true
         )
 
+        val taskStartMs = System.currentTimeMillis()
         val request = YoutubeDLRequest("https://music.youtube.com/watch?v=${task.videoId}").apply {
             val formatSpec = if (audioQuality == AudioQuality.LOW) "ba[abr<=96]/ba" else "ba"
             addOption("-f", formatSpec)
             addOption("-x")
             addOption("--audio-format", "mp3")
             addOption("--audio-quality", audioQuality.ytDlpQuality)
+            addOption("--write-thumbnail")
             addOption("--embed-thumbnail")
             addOption("--add-metadata")
             addOption("--no-playlist")
@@ -198,6 +206,10 @@ class SongDownloader(private val context: Context) {
         }
 
         thread {
+            var exitCode = -1
+            var output: String? = null
+            var errorMessage: String? = null
+
             try {
                 var lastProgress = -1
                 val response = YoutubeDL.getInstance().execute(request) { progress, etaInSeconds, _ ->
@@ -214,40 +226,80 @@ class SongDownloader(private val context: Context) {
                         )
                     }
                 }
+                output = response.out
+                exitCode = response.exitCode
+            } catch (e: Exception) {
+                errorMessage = e.message ?: "Kesalahan tidak diketahui"
+            }
 
-                val output = response.out
-                val exitCode = response.exitCode
+            // Pindahkan file gambar thumbnail yang tertinggal di Downloads/ ke Covers/
+            try {
+                FileUtils.moveStrayThumbnailsToCoversDir()
+            } catch (_: Exception) {}
 
-                mainHandler.post {
-                    if (exitCode == 0) {
+            val recentAudio = FileUtils.getOfflineAudioFiles().firstOrNull { f ->
+                f.lastModified() >= taskStartMs - 5_000L
+            }
+            val downloadedAudio = recentAudio ?: if (exitCode == 0) findDuplicateFile(task.title) else null
+            val resolvedTitle = task.title.ifBlank { downloadedAudio?.nameWithoutExtension.orEmpty() }
+            val finalDisplayTitle = resolvedTitle.ifBlank { displayTitle }
+            val fullErrMsg = errorMessage
+                ?: output?.lines()?.lastOrNull { it.isNotBlank() }
+                ?: "Gagal memproses konversi audio (FFmpeg)"
+            val compactErrMsg = fullErrMsg.lines()
+                .lastOrNull { it.isNotBlank() }
+                ?.trim()
+                ?.take(160)
+                ?: fullErrMsg
+
+            if (exitCode == 0 || recentAudio != null) {
+                try {
+                    LyricsRepository.downloadAndSaveLrcForOfflineSong(
+                        title = resolvedTitle,
+                        artist = task.artist,
+                        targetDir = FileUtils.getLyricsDir(),
+                        mp3File = downloadedAudio
+                    )
+                } catch (_: Exception) {}
+            }
+
+            mainHandler.post {
+                when {
+                    exitCode == 0 -> {
                         updateDownloadNotification(
                             title = "Unduhan Selesai",
-                            text = "$displayTitle tersimpan di offline",
+                            text = "$finalDisplayTitle tersimpan di offline",
                             isDone = true
                         )
-                        task.onSuccess?.invoke(displayTitle)
-                    } else {
-                        val errMsg = output?.lines()?.lastOrNull { it.isNotBlank() } ?: "Gagal memproses audio"
+                        task.onSuccess?.invoke(finalDisplayTitle)
+                    }
+                    recentAudio != null -> {
+                        Log.e("SongDownloader", "Post-processing/FFmpeg gagal untuk $finalDisplayTitle (exitCode=$exitCode): $fullErrMsg")
                         updateDownloadNotification(
-                            title = "Unduh Gagal (Kode $exitCode)",
-                            text = errMsg,
+                            title = "Tersimpan (${recentAudio.extension.uppercase()}) - Konversi MP3 Gagal",
+                            text = "$finalDisplayTitle tersimpan tanpa konversi MP3: $compactErrMsg",
+                            isDone = true
+                        )
+                        val partialCallback = task.onPartialSuccess
+                        if (partialCallback != null) {
+                            partialCallback.invoke(finalDisplayTitle, recentAudio.name, compactErrMsg)
+                        } else {
+                            task.onSuccess?.invoke(finalDisplayTitle)
+                        }
+                    }
+                    else -> {
+                        Log.e("SongDownloader", "Unduh gagal untuk $displayTitle (exitCode=$exitCode): $fullErrMsg")
+                        val failTitle = if (exitCode != -1) "Unduh Gagal (Kode $exitCode)" else "Unduh Gagal"
+                        updateDownloadNotification(
+                            title = failTitle,
+                            text = compactErrMsg,
                             ongoing = false
                         )
-                        task.onError?.invoke(displayTitle, "Unduh gagal (kode $exitCode): $errMsg")
+                        val callbackMsg = if (exitCode != -1) "Unduh gagal (kode $exitCode): $compactErrMsg" else compactErrMsg
+                        task.onError?.invoke(displayTitle, callbackMsg)
                     }
-                    processNextInQueue()
                 }
-            } catch (e: Exception) {
-                mainHandler.post {
-                    val errorMsg = e.message ?: "Kesalahan tidak diketahui"
-                    updateDownloadNotification(
-                        title = "Unduh Gagal",
-                        text = errorMsg,
-                        ongoing = false
-                    )
-                    task.onError?.invoke(displayTitle, errorMsg)
-                    processNextInQueue()
-                }
+                processNextInQueue()
             }
         }
     }

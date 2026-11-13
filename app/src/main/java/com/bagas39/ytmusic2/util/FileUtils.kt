@@ -15,10 +15,25 @@ import java.io.File
 
 object FileUtils {
 
+    const val BASE_DIR = "YTMusic2"
     const val DOWNLOAD_DIR = "YTMusic2/Downloads"
+    const val LYRICS_DIR = "YTMusic2/Lyrics"
+    const val COVERS_DIR = "YTMusic2/Covers"
 
     /**
-     * Mengambil direktori unduhan aplikasi di folder Download publik perangkat.
+     * Mengambil direktori dasar YTMusic2 di folder Download publik perangkat.
+     */
+    fun getBaseDir(): File {
+        val dir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            BASE_DIR
+        )
+        if (!dir.exists()) dir.mkdirs()
+        return dir
+    }
+
+    /**
+     * Mengambil direktori unduhan audio aplikasi di folder Download publik perangkat.
      */
     fun getDownloadDir(): File {
         val dir = File(
@@ -30,6 +45,67 @@ object FileUtils {
     }
 
     /**
+     * Mengambil direktori khusus file lirik (.lrc) terpisah dari folder lagu.
+     */
+    fun getLyricsDir(): File {
+        val dir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            LYRICS_DIR
+        )
+        if (!dir.exists()) dir.mkdirs()
+        return dir
+    }
+
+    /**
+     * Mengambil direktori khusus gambar sampul album (.jpg / .png).
+     */
+    fun getCoversDir(): File {
+        val dir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            COVERS_DIR
+        )
+        if (!dir.exists()) dir.mkdirs()
+        return dir
+    }
+
+    /**
+     * Mengembalikan file `.lrc` pendamping di folder `YTMusic2/Lyrics/` untuk suatu file audio.
+     */
+    fun getCompanionLrcFile(audioFile: File): File {
+        return File(getLyricsDir(), "${audioFile.nameWithoutExtension}.lrc")
+    }
+
+    /**
+     * Mengembalikan file sampul album pendamping di folder `YTMusic2/Covers/` untuk suatu file audio.
+     */
+    fun getCompanionCoverFile(audioFile: File): File {
+        return File(getCoversDir(), "${audioFile.nameWithoutExtension}.jpg")
+    }
+
+    /**
+     * Menghapus file audio beserta seluruh file pendampingnya (.lrc di Lyrics/,
+     * file .lrc legacy di Downloads/, serta sampul di Covers/).
+     */
+    fun deleteSongAndCompanions(audioFile: File): Boolean {
+        val deleted = audioFile.delete()
+        if (deleted) {
+            val lrcFile = getCompanionLrcFile(audioFile)
+            if (lrcFile.exists()) lrcFile.delete()
+
+            val legacyLrc = File(audioFile.parentFile, "${audioFile.nameWithoutExtension}.lrc")
+            if (legacyLrc.exists()) legacyLrc.delete()
+
+            val baseName = audioFile.nameWithoutExtension
+            val coversDir = getCoversDir()
+            listOf("jpg", "jpeg", "png", "webp").forEach { ext ->
+                val coverFile = File(coversDir, "$baseName.$ext")
+                if (coverFile.exists()) coverFile.delete()
+            }
+        }
+        return deleted
+    }
+
+    /**
      * Memeriksa apakah ekstensi file merupakan format audio yang didukung.
      */
     fun isAudio(name: String): Boolean {
@@ -38,6 +114,35 @@ object FileUtils {
             lower.endsWith(".webm") || lower.endsWith(".opus") ||
             lower.endsWith(".aac") || lower.endsWith(".ogg") ||
             lower.endsWith(".flac") || lower.endsWith(".wav")
+    }
+
+    /**
+     * Memeriksa apakah ekstensi file merupakan format gambar sampul.
+     */
+    fun isImage(name: String): Boolean {
+        val lower = name.lowercase()
+        return lower.endsWith(".jpg") || lower.endsWith(".jpeg") ||
+            lower.endsWith(".png") || lower.endsWith(".webp")
+    }
+
+    /**
+     * Memindahkan file gambar thumbnail yang tertinggal di `YTMusic2/Downloads/`
+     * ke `YTMusic2/Covers/` agar folder lagu tetap bersih dari file gambar.
+     */
+    fun moveStrayThumbnailsToCoversDir() {
+        val downloadDir = getDownloadDir()
+        val coversDir = getCoversDir()
+        val imageFiles = downloadDir.listFiles { f -> f.isFile && isImage(f.name) } ?: return
+        for (img in imageFiles) {
+            try {
+                val target = File(coversDir, img.name)
+                if (target.exists()) target.delete()
+                if (!img.renameTo(target)) {
+                    img.copyTo(target, overwrite = true)
+                    img.delete()
+                }
+            } catch (_: Exception) {}
+        }
     }
 
     /**

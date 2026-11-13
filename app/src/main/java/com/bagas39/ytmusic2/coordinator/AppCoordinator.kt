@@ -10,6 +10,7 @@ import com.bagas39.ytmusic2.KeepAliveWebView
 import com.bagas39.ytmusic2.MusicBackgroundService
 import com.bagas39.ytmusic2.R
 import com.bagas39.ytmusic2.downloader.SongDownloader
+import com.bagas39.ytmusic2.lyrics.LyricsRepository
 import com.bagas39.ytmusic2.player.AudioQuality
 import com.bagas39.ytmusic2.player.OfflinePlayerManager
 import com.bagas39.ytmusic2.webview.StreamMediaOptimizer
@@ -43,6 +44,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
     private lateinit var dialogManager: AppDialogManager
 
     private var currentOnlineTitle: String = ""
+    private var currentOnlineArtist: String = ""
     private var sleepTimer: CountDownTimer? = null
     private var sleepTimerRemainingMs: Long = 0L
 
@@ -75,6 +77,15 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         // 3. Inisialisasi modul logika & domain
         initModules(savedDataSaver, savedQuality)
         webManager.setDataSaverEnabled(savedDataSaver)
+
+        // Rapikan file thumbnail lama dari Downloads/ ke Covers/ di background
+        kotlin.concurrent.thread(name = "ytm-cover-cleanup") {
+            try {
+                if (PermissionHelper.hasStoragePermission(activity)) {
+                    FileUtils.moveStrayThumbnailsToCoversDir()
+                }
+            } catch (_: Exception) {}
+        }
 
         // 4. Hubungkan event UI dari ViewController ke orkestrator
         setupViewControllerEvents()
@@ -150,6 +161,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
             }
             onSongStateChanged = { metadata ->
                 currentOnlineTitle = metadata.title
+                currentOnlineArtist = metadata.artist
                 streamOptimizer.updateTrackTitle(metadata.title)
                 // Jika sedang mode offline dan user memutar lagu di webview YTM:
                 if (offlinePlayer.isOfflineActive) {
@@ -374,6 +386,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         downloader.downloadSong(
             videoId = videoId,
             title = currentOnlineTitle,
+            artist = currentOnlineArtist,
             forceDownload = forceDownload,
             onStart = { displayTitle ->
                 Toast.makeText(activity, "Mulai mengunduh: $displayTitle", Toast.LENGTH_SHORT).show()
@@ -395,6 +408,14 @@ class AppCoordinator(private val activity: AppCompatActivity) {
                 Toast.makeText(activity, "Selesai unduh: $displayTitle", Toast.LENGTH_LONG).show()
                 offlinePlayer.setPlaylist(FileUtils.getOfflineAudioFiles())
             },
+            onPartialSuccess = { _, savedFileName, warning ->
+                Toast.makeText(
+                    activity,
+                    "Lagu & lirik tersimpan ($savedFileName), namun konversi MP3 gagal: $warning",
+                    Toast.LENGTH_LONG
+                ).show()
+                offlinePlayer.setPlaylist(FileUtils.getOfflineAudioFiles())
+            },
             onError = { _, error ->
                 Toast.makeText(activity, error, Toast.LENGTH_LONG).show()
             }
@@ -412,8 +433,18 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         dialogManager.showOfflineFilesDialog(
             files = files,
             storagePath = FileUtils.getDownloadDir().absolutePath,
+            hasLyricsPredicate = { file -> LyricsRepository.hasLocalLyrics(file) },
             onSelectFileIndex = { which ->
                 showFileActions(which, files)
+            },
+            onBatchDeleteClicked = {
+                dialogManager.showBatchDeleteDialog(
+                    files = files,
+                    hasLyricsPredicate = { file -> LyricsRepository.hasLocalLyrics(file) },
+                    onConfirmBatchDelete = { selectedFiles ->
+                        performBatchDelete(selectedFiles)
+                    }
+                )
             },
             onOpenFolder = {
                 FileUtils.openDownloadFolder(activity)
@@ -424,9 +455,11 @@ class AppCoordinator(private val activity: AppCompatActivity) {
     private fun showFileActions(index: Int, files: List<File>) {
         if (index !in files.indices) return
         val file = files[index]
+        val hasLyrics = LyricsRepository.hasLocalLyrics(file)
 
         dialogManager.showFileActionDialog(
             file = file,
+            hasLyrics = hasLyrics,
             onPlay = {
                 webManager.pausePlayback()
                 offlinePlayer.playSongAtIndex(index, files)
@@ -437,6 +470,35 @@ class AppCoordinator(private val activity: AppCompatActivity) {
             },
             onShare = {
                 FileUtils.shareFile(activity, file)
+            },
+            onDownloadLyrics = {
+                Toast.makeText(activity, "Mencari lirik untuk ${file.nameWithoutExtension}...", Toast.LENGTH_SHORT).show()
+                LyricsRepository.getLyricsAsync(
+                    title = file.nameWithoutExtension,
+                    offlineFile = file
+                ) { result ->
+                    if (result != null && result.rawLrc.isNotBlank()) {
+                        val lrcFile = FileUtils.getCompanionLrcFile(file)
+                        if (!lrcFile.exists()) {
+                            LyricsRepository.saveLrcToFile(result.rawLrc, lrcFile)
+                        }
+                        val statusMsg = if (result.isSynced) {
+                            "Lirik karaoke (.lrc) tersimpan di YTMusic2/Lyrics"
+                        } else {
+                            "Lirik teks tersimpan di YTMusic2/Lyrics"
+                        }
+                        Toast.makeText(activity, statusMsg, Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(activity, "Lirik tidak ditemukan di LRCLIB", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
+            onDeleteLyricsOnly = {
+                if (LyricsRepository.deleteLocalLyrics(file)) {
+                    Toast.makeText(activity, "File lirik (.lrc) dihapus", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(activity, "File lirik tidak ditemukan", Toast.LENGTH_SHORT).show()
+                }
             },
             onDelete = {
                 confirmDelete(file)
@@ -449,12 +511,47 @@ class AppCoordinator(private val activity: AppCompatActivity) {
             if (offlinePlayer.currentSong?.absolutePath == file.absolutePath) {
                 offlinePlayer.stop()
             }
-            if (file.delete()) {
-                Toast.makeText(activity, "File dihapus", Toast.LENGTH_SHORT).show()
+            if (FileUtils.deleteSongAndCompanions(file)) {
+                LyricsRepository.deleteLocalLyrics(file)
+                Toast.makeText(activity, "Lagu & file pendamping dihapus", Toast.LENGTH_SHORT).show()
                 showOfflineFiles()
             } else {
                 Toast.makeText(activity, "Gagal menghapus file", Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+
+    private fun performBatchDelete(selectedFiles: List<File>) {
+        if (selectedFiles.isEmpty()) return
+
+        val activePath = offlinePlayer.currentSong?.absolutePath
+        if (activePath != null && selectedFiles.any { it.absolutePath == activePath }) {
+            offlinePlayer.stop()
+        }
+
+        var deletedCount = 0
+        for (file in selectedFiles) {
+            if (FileUtils.deleteSongAndCompanions(file)) {
+                LyricsRepository.deleteLocalLyrics(file)
+                deletedCount++
+            }
+        }
+
+        val remainingFiles = FileUtils.getOfflineAudioFiles()
+        offlinePlayer.setPlaylist(remainingFiles)
+
+        if (deletedCount > 0) {
+            Toast.makeText(
+                activity,
+                "Berhasil menghapus $deletedCount lagu beserta atributnya",
+                Toast.LENGTH_SHORT
+            ).show()
+        } else {
+            Toast.makeText(activity, "Gagal menghapus file terpilih", Toast.LENGTH_SHORT).show()
+        }
+
+        if (remainingFiles.isNotEmpty()) {
+            showOfflineFiles()
         }
     }
 
