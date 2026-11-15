@@ -2,9 +2,11 @@ package com.bagas39.ytmusic2.lyrics
 
 import android.os.Handler
 import android.os.Looper
+import android.util.Base64
 import android.util.LruCache
 import com.bagas39.ytmusic2.util.FileUtils
 import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -13,13 +15,20 @@ import kotlin.concurrent.thread
 import kotlin.math.abs
 
 /**
- * Mengelola pengambilan lirik dari cache lokal (`.lrc`) maupun LRCLIB API publik,
- * serta menyimpan file `.lrc` pendamping untuk lagu offline.
+ * Mengelola pengambilan lirik dari cache lokal (`.lrc`) maupun rantai API publik
+ * (LRCLIB -> NetEase -> KuGou -> Lyrics.ovh), serta menyimpan file `.lrc` pendamping untuk lagu offline.
  */
 object LyricsRepository {
 
     private const val LRCLIB_SEARCH_URL = "https://lrclib.net/api/search"
+    private const val NETEASE_SEARCH_URL = "https://music.163.com/api/search/get"
+    private const val NETEASE_LYRIC_URL = "https://music.163.com/api/song/lyric"
+    private const val KUGOU_SEARCH_URL = "https://lyrics.kugou.com/search"
+    private const val KUGOU_DOWNLOAD_URL = "https://lyrics.kugou.com/download"
+    private const val LYRICS_OVH_BASE_URL = "https://api.lyrics.ovh/v1"
     private const val USER_AGENT = "ytmusic2.0/1.3.0 (https://github.com/bagas39/ytmusic2.0)"
+    private const val BROWSER_USER_AGENT =
+        "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
     private const val CONNECT_TIMEOUT_MS = 8000
     private const val READ_TIMEOUT_MS = 8000
 
@@ -35,6 +44,7 @@ object LyricsRepository {
     private val PUNCT_NORM_REGEX = Regex("""[\\/:*?"<>|\u29f8\uff0f\uff1a\uff0a\uff1f\uff02\uff1c\uff1e\uff5c_\-]+""")
     private val MULTISPACE_REGEX = Regex("""\s+""")
     private val INVALID_FILENAME_REGEX = Regex("""[\\/:*?"<>|\u0000-\u001f]""")
+    private val OVH_HEADER_REGEX = Regex("""^Paroles de la chanson [^\r\n]+[\r\n]+""", RegexOption.IGNORE_CASE)
 
     /**
      * Membersihkan judul dan nama artis dari embel-embel umum YouTube agar pencarian
@@ -157,7 +167,8 @@ object LyricsRepository {
 
     /**
      * Mengambil lirik secara asynchronous: memprioritaskan file `.lrc` lokal di `YTMusic2/Lyrics/`,
-     * lalu memory cache, dan terakhir LRCLIB API. Hasil dikirim kembali ke main thread melalui [onResult].
+     * lalu memory cache, dan terakhir rantai API (LRCLIB -> NetEase -> KuGou -> Lyrics.ovh).
+     * Hasil dikirim kembali ke main thread melalui [onResult].
      */
     fun getLyricsAsync(
         title: String,
@@ -187,10 +198,11 @@ object LyricsRepository {
                         artist = cleanArtist
                     )?.also { memoryCache.put(cacheKey, it) }
                 } else {
-                    // 2. Cek in-memory LRU cache, atau 3. Ambil dari LRCLIB API
-                    val resolved = memoryCache.get(cacheKey) ?: fetchFromLrclib(cleanTitle, cleanArtist, durationMs)?.also { fetched ->
-                        memoryCache.put(cacheKey, fetched)
-                    }
+                    // 2. Cek in-memory LRU cache, atau 3. Ambil dari rantai penyedia lirik
+                    val resolved = memoryCache.get(cacheKey)
+                        ?: fetchLyricsWithFallbacks(cleanTitle, cleanArtist, durationMs)?.also { fetched ->
+                            memoryCache.put(cacheKey, fetched)
+                        }
                     // Jika lagu offline ada dan ditemukan lirik sinkron, simpan otomatis ke YTMusic2/Lyrics/
                     if (offlineFile != null && resolved != null && resolved.isSynced && resolved.rawLrc.isNotBlank()) {
                         val companion = FileUtils.getCompanionLrcFile(offlineFile)
@@ -223,7 +235,7 @@ object LyricsRepository {
         val cacheKey = buildCacheKey(cleanTitle, cleanArtist)
 
         val result = memoryCache.get(cacheKey)
-            ?: fetchFromLrclib(cleanTitle, cleanArtist, durationMs = 0L)?.also {
+            ?: fetchLyricsWithFallbacks(cleanTitle, cleanArtist, durationMs = 0L)?.also {
                 memoryCache.put(cacheKey, it)
             }
             ?: return null
@@ -239,6 +251,30 @@ object LyricsRepository {
         }
 
         return if (saveLrcToFile(contentToSave, targetFile)) targetFile else null
+    }
+
+    /**
+     * Mencoba penyedia lirik secara berurutan (LRCLIB -> NetEase -> KuGou -> Lyrics.ovh).
+     * Mengutamakan lirik sinkron (`isSynced == true`) dan menyimpan hasil plain text paling awal
+     * sebagai cadangan bila tidak ada penyedia yang memiliki timestamp LRC.
+     */
+    private fun fetchLyricsWithFallbacks(
+        cleanTitle: String,
+        cleanArtist: String,
+        durationMs: Long
+    ): LyricsResult? {
+        var plainFallback: LyricsResult? = null
+        val syncedCapableFetchers = listOf(
+            ::fetchFromLrclib,
+            ::fetchFromNetease,
+            ::fetchFromKugou
+        )
+        for (fetcher in syncedCapableFetchers) {
+            val result = fetcher(cleanTitle, cleanArtist, durationMs) ?: continue
+            if (result.isSynced) return result
+            if (plainFallback == null) plainFallback = result
+        }
+        return plainFallback ?: fetchFromLyricsOvh(cleanTitle, cleanArtist)
     }
 
     private fun fetchFromLrclib(cleanTitle: String, cleanArtist: String, durationMs: Long): LyricsResult? {
@@ -266,27 +302,189 @@ object LyricsRepository {
     }
 
     private fun requestLrclibSearch(query: String): JSONArray? {
+        val encodedQuery = URLEncoder.encode(query, "UTF-8")
+        val body = requestUrlText("$LRCLIB_SEARCH_URL?q=$encodedQuery") ?: return null
+        return try {
+            JSONArray(body)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun fetchFromNetease(cleanTitle: String, cleanArtist: String, durationMs: Long): LyricsResult? {
+        val primaryQuery = listOf(cleanTitle, cleanArtist)
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
+            .trim()
+        if (primaryQuery.isEmpty()) return null
+
+        val neteaseHeaders = mapOf(
+            "Referer" to "https://music.163.com",
+            "User-Agent" to BROWSER_USER_AGENT
+        )
+
+        val primarySongs = requestNeteaseSearch(primaryQuery, neteaseHeaders)
+        val songs = if (primarySongs != null && primarySongs.length() > 0) {
+            primarySongs
+        } else if (cleanArtist.isNotBlank() && cleanTitle.isNotBlank()) {
+            requestNeteaseSearch(cleanTitle, neteaseHeaders)
+        } else {
+            null
+        }
+        if (songs == null || songs.length() == 0) return null
+
+        val bestSong = pickBestJsonCandidate(songs, cleanTitle, cleanArtist, durationMs) { song ->
+            val songId = song.optLong("id", -1L)
+            if (songId <= 0L) return@pickBestJsonCandidate null
+            val trackName = song.optString("name", "").trim()
+            val artistName = song.optJSONArray("artists")
+                ?.optJSONObject(0)
+                ?.optString("name", "")
+                ?.trim()
+                .orEmpty()
+            Triple(trackName, artistName, song.optDouble("duration", -1.0) / 1000.0)
+        } ?: return null
+
+        val bestSongId = bestSong.optLong("id", -1L)
+        val bestTrackName = bestSong.optString("name", "").trim().ifBlank { cleanTitle }
+        val bestArtistName = bestSong.optJSONArray("artists")
+            ?.optJSONObject(0)
+            ?.optString("name", "")
+            ?.trim()
+            .orEmpty()
+            .ifBlank { cleanArtist }
+
+        val lyricBody = requestUrlText(
+            "$NETEASE_LYRIC_URL?id=$bestSongId&lv=1&kv=1&tv=-1",
+            neteaseHeaders
+        ) ?: return null
+
+        return try {
+            val json = JSONObject(lyricBody)
+            val standardLrc = json.optJSONObject("lrc")?.optString("lyric", "")?.trim().orEmpty()
+            val karaokeLrc = json.optJSONObject("klyric")?.optString("lyric", "")?.trim().orEmpty()
+            val rawLrc = standardLrc.ifEmpty { karaokeLrc }
+            if (rawLrc.isEmpty()) return null
+            parseLrcToResult(rawLrc, bestTrackName, bestArtistName)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun requestNeteaseSearch(query: String, headers: Map<String, String>): JSONArray? {
+        val encodedQuery = URLEncoder.encode(query, "UTF-8")
+        val body = requestUrlText("$NETEASE_SEARCH_URL?s=$encodedQuery&type=1&limit=5", headers) ?: return null
+        return try {
+            JSONObject(body).optJSONObject("result")?.optJSONArray("songs")
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun fetchFromKugou(cleanTitle: String, cleanArtist: String, durationMs: Long): LyricsResult? {
+        val query = listOf(cleanArtist, cleanTitle)
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
+            .trim()
+        if (query.isEmpty()) return null
+
+        val durationCandidates = if (durationMs > 0L) requestKugouCandidates(query, durationMs) else null
+        val candidates = if (durationCandidates != null && durationCandidates.length() > 0) {
+            durationCandidates
+        } else {
+            requestKugouCandidates(query, durationMs = null)
+        }
+        if (candidates == null || candidates.length() == 0) return null
+
+        val bestCandidate = pickBestJsonCandidate(candidates, cleanTitle, cleanArtist, durationMs) { item ->
+            val id = item.optString("id", "").trim()
+            val accessKey = item.optString("accesskey", "").trim()
+            if (id.isEmpty() || accessKey.isEmpty()) return@pickBestJsonCandidate null
+            val trackName = item.optString("song", "").trim()
+            val artistName = item.optString("singer", "").trim()
+            Triple(trackName, artistName, item.optDouble("duration", -1.0) / 1000.0)
+        } ?: return null
+
+        val bestId = bestCandidate.optString("id", "").trim()
+        val bestAccessKey = bestCandidate.optString("accesskey", "").trim()
+        val bestTrackName = bestCandidate.optString("song", "").trim().ifBlank { cleanTitle }
+        val bestArtistName = bestCandidate.optString("singer", "").trim().ifBlank { cleanArtist }
+
+        val downloadUrl = "$KUGOU_DOWNLOAD_URL?ver=1&client=pc" +
+            "&id=${URLEncoder.encode(bestId, "UTF-8")}" +
+            "&accesskey=${URLEncoder.encode(bestAccessKey, "UTF-8")}" +
+            "&fmt=lrc&charset=utf8"
+        val downloadBody = requestUrlText(downloadUrl) ?: return null
+
+        return try {
+            val base64Content = JSONObject(downloadBody).optString("content", "").trim()
+            if (base64Content.isEmpty()) return null
+            val decodedBytes = Base64.decode(base64Content, Base64.DEFAULT)
+            val rawLrc = String(decodedBytes, Charsets.UTF_8).trim()
+            if (rawLrc.isEmpty()) return null
+            parseLrcToResult(rawLrc, bestTrackName, bestArtistName)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun requestKugouCandidates(query: String, durationMs: Long?): JSONArray? {
+        val encodedQuery = URLEncoder.encode(query, "UTF-8")
+        // Jangan kirim &duration=0 ke KuGou karena KuGou akan mengembalikan 0 kandidat
+        val durationParam = if (durationMs != null && durationMs > 0L) "&duration=$durationMs" else ""
+        val body = requestUrlText("$KUGOU_SEARCH_URL?ver=1&man=yes&client=pc&keyword=$encodedQuery$durationParam")
+            ?: return null
+        return try {
+            JSONObject(body).optJSONArray("candidates")
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun fetchFromLyricsOvh(cleanTitle: String, cleanArtist: String): LyricsResult? {
+        if (cleanTitle.isBlank() || cleanArtist.isBlank()) return null
+
+        val encodedArtist = encodeUrlPathSegment(cleanArtist)
+        val encodedTitle = encodeUrlPathSegment(cleanTitle)
+        val body = requestUrlText("$LYRICS_OVH_BASE_URL/$encodedArtist/$encodedTitle") ?: return null
+
+        return try {
+            val rawLyrics = JSONObject(body).optString("lyrics", "")
+            val cleaned = OVH_HEADER_REGEX.replace(rawLyrics, "")
+                .replace("\r\n", "\n")
+                .trim()
+            if (cleaned.isEmpty()) return null
+            parseLrcToResult(cleaned, cleanTitle, cleanArtist)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun requestUrlText(urlString: String, headers: Map<String, String> = emptyMap()): String? {
         var conn: HttpURLConnection? = null
         return try {
-            val encodedQuery = URLEncoder.encode(query, "UTF-8")
-            val url = URL("$LRCLIB_SEARCH_URL?q=$encodedQuery")
+            val url = URL(urlString)
             conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 connectTimeout = CONNECT_TIMEOUT_MS
                 readTimeout = READ_TIMEOUT_MS
                 setRequestProperty("User-Agent", USER_AGENT)
                 setRequestProperty("Accept", "application/json")
+                headers.forEach { (key, value) -> setRequestProperty(key, value) }
             }
 
             if (conn.responseCode !in 200..299) return null
             val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-            if (body.isBlank()) return null
-            JSONArray(body)
+            body.takeIf { it.isNotBlank() }
         } catch (_: Exception) {
             null
         } finally {
             conn?.disconnect()
         }
+    }
+
+    private fun encodeUrlPathSegment(segment: String): String {
+        return URLEncoder.encode(segment.trim(), "UTF-8").replace("+", "%20")
     }
 
     private fun selectBestCandidate(
@@ -311,36 +509,16 @@ object LyricsRepository {
             val trackName = item.optString("trackName", targetTitle)
             val artistName = item.optString("artistName", targetArtist)
             val durationSec = item.optDouble("duration", -1.0)
-
-            var score = 0
             val isSynced = synced.isNotEmpty()
-            if (isSynced) score += 100
 
-            val normTrack = normalizeForMatch(trackName)
-            val normArtist = normalizeForMatch(artistName)
-
-            if (normTargetTitle.isNotEmpty()) {
-                when {
-                    normTrack == normTargetTitle -> score += 40
-                    normTrack.contains(normTargetTitle) || normTargetTitle.contains(normTrack) -> score += 20
-                }
-            }
-
-            if (normTargetArtist.isNotEmpty()) {
-                when {
-                    normArtist == normTargetArtist -> score += 35
-                    normArtist.contains(normTargetArtist) || normTargetArtist.contains(normArtist) -> score += 20
-                }
-            }
-
-            if (targetDurationSec > 0 && durationSec > 0) {
-                val diff = abs(durationSec - targetDurationSec)
-                when {
-                    diff <= 2.0 -> score += 30
-                    diff <= 5.0 -> score += 15
-                    diff > 20.0 -> score -= 20
-                }
-            }
+            val score = (if (isSynced) 100 else 0) + scoreCandidateMetadata(
+                normTrack = normalizeForMatch(trackName),
+                normArtist = normalizeForMatch(artistName),
+                candidateDurationSec = durationSec,
+                normTargetTitle = normTargetTitle,
+                normTargetArtist = normTargetArtist,
+                targetDurationSec = targetDurationSec
+            )
 
             if (score > bestScore) {
                 val lines = if (isSynced) LrcParser.parse(synced) else LrcParser.parsePlain(plain)
@@ -358,6 +536,82 @@ object LyricsRepository {
         }
 
         return bestResult
+    }
+
+    private fun pickBestJsonCandidate(
+        array: JSONArray,
+        cleanTitle: String,
+        cleanArtist: String,
+        durationMs: Long,
+        extractMeta: (JSONObject) -> Triple<String, String, Double>?
+    ): JSONObject? {
+        val normTargetTitle = normalizeForMatch(cleanTitle)
+        val normTargetArtist = normalizeForMatch(cleanArtist)
+        val targetDurationSec = if (durationMs > 0L) durationMs / 1000.0 else -1.0
+
+        var bestItem: JSONObject? = null
+        var bestScore = Int.MIN_VALUE
+
+        for (i in 0 until array.length()) {
+            val item = array.optJSONObject(i) ?: continue
+            val (trackName, artistName, durationSec) = extractMeta(item) ?: continue
+            val normTrack = normalizeForMatch(trackName)
+            if (!titlesMatch(normTrack, normTargetTitle)) continue
+
+            val score = scoreCandidateMetadata(
+                normTrack = normTrack,
+                normArtist = normalizeForMatch(artistName),
+                candidateDurationSec = durationSec,
+                normTargetTitle = normTargetTitle,
+                normTargetArtist = normTargetArtist,
+                targetDurationSec = targetDurationSec
+            )
+            if (score > bestScore) {
+                bestScore = score
+                bestItem = item
+            }
+        }
+
+        return bestItem
+    }
+
+    private fun titlesMatch(normTrack: String, normTargetTitle: String): Boolean {
+        if (normTrack.isEmpty() || normTargetTitle.isEmpty()) return false
+        return normTrack == normTargetTitle ||
+            normTrack.contains(normTargetTitle) ||
+            normTargetTitle.contains(normTrack)
+    }
+
+    private fun scoreCandidateMetadata(
+        normTrack: String,
+        normArtist: String,
+        candidateDurationSec: Double,
+        normTargetTitle: String,
+        normTargetArtist: String,
+        targetDurationSec: Double
+    ): Int {
+        var score = 0
+        if (normTargetTitle.isNotEmpty() && normTrack.isNotEmpty()) {
+            when {
+                normTrack == normTargetTitle -> score += 40
+                normTrack.contains(normTargetTitle) || normTargetTitle.contains(normTrack) -> score += 20
+            }
+        }
+        if (normTargetArtist.isNotEmpty() && normArtist.isNotEmpty()) {
+            when {
+                normArtist == normTargetArtist -> score += 35
+                normArtist.contains(normTargetArtist) || normTargetArtist.contains(normArtist) -> score += 20
+            }
+        }
+        if (targetDurationSec > 0 && candidateDurationSec > 0) {
+            val diff = abs(candidateDurationSec - targetDurationSec)
+            when {
+                diff <= 2.0 -> score += 30
+                diff <= 5.0 -> score += 15
+                diff > 20.0 -> score -= 20
+            }
+        }
+        return score
     }
 
     private fun parseLrcToResult(raw: String, title: String, artist: String): LyricsResult? {
