@@ -99,7 +99,13 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
         settings.mediaPlaybackRequiresUserGesture = false
 
         val defaultUa = settings.userAgentString
-        settings.userAgentString = defaultUa.replace("; wv", "")
+        val cleanUa = if (!defaultUa.contains("Mobile")) {
+            // Pada Android TV / tablet, paksa identitas mobile agar YouTube Music menyajikan web player lengkap tanpa redirect ke Play Store
+            "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+        } else {
+            defaultUa.replace("; wv", "")
+        }
+        settings.userAgentString = cleanUa
 
         setupJsBridge()
         setupClients()
@@ -162,8 +168,13 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                 request: WebResourceRequest?
             ): Boolean {
                 val url = request?.url?.toString().orEmpty()
-                if (url.startsWith("intent://") || url.startsWith("vnd.youtube") || url.startsWith("market://")) {
-                    Log.d("YTM-BYPASS", "Blocked external app redirect: $url")
+                if (url.startsWith("intent://") ||
+                    url.startsWith("vnd.youtube") ||
+                    url.startsWith("market://") ||
+                    url.contains("play.google.com") ||
+                    url.contains("google.com/url")
+                ) {
+                    Log.d("YTM-BYPASS", "Blocked external app/store redirect: $url")
                     return true
                 }
                 return super.shouldOverrideUrlLoading(view, request)
@@ -202,6 +213,13 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                 super.onPageStarted(view, url, favicon)
+                val targetUrl = url.orEmpty()
+                if (targetUrl.contains("play.google.com") || targetUrl.contains("google.com/store")) {
+                    Log.d("YTM-BYPASS", "Redirecting from Play Store back to YouTube Music")
+                    view?.stopLoading()
+                    view?.loadUrl("https://music.youtube.com/")
+                    return
+                }
                 onPageLifecycleInject?.invoke()
                 injectBypassScript()
             }
@@ -439,7 +457,8 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                 if (!document.getElementById('ytm-miniplayer-fix-style')) {
                     var ms = document.createElement('style');
                     ms.id = 'ytm-miniplayer-fix-style';
-                    ms.textContent = 'ytmusic-app-layout[player-page-open] > ytmusic-player-bar, ' +
+                    ms.textContent = 'ytmusic-mealbar-promo-renderer, ytmusic-upsell-dialog-renderer, .ytmusic-mealbar-promo-renderer, [dialog-type="MEALBAR"] { display: none !important; visibility: hidden !important; pointer-events: none !important; } ' +
+                                    'ytmusic-app-layout[player-page-open] > ytmusic-player-bar, ' +
                                     'ytmusic-app-layout[player-ui-state="PLAYER_PAGE_OPEN"] > ytmusic-player-bar, ' +
                                     'ytmusic-player-page[player-page-open] ~ ytmusic-player-bar { visibility: hidden !important; display: none !important; pointer-events: none !important; } ' +
                                     'ytmusic-player-page:not([player-page-open]) { visibility: hidden !important; pointer-events: none !important; } ' +

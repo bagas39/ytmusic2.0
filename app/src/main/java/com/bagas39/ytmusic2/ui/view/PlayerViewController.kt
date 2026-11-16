@@ -1,6 +1,7 @@
 package com.bagas39.ytmusic2.ui.view
 
 import android.app.Activity
+import android.content.pm.PackageManager
 import android.view.View
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -56,6 +57,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -169,6 +171,11 @@ class PlayerViewController(private val rootView: View) {
         val ytmCrimson = Color(0xFFFF0033)
         val ytmCrimsonLight = Color(0xFFFF4D6D)
         val mutedText = Color(0xFFAAAAAA)
+
+        val context = LocalContext.current
+        val isTvMode = remember {
+            !context.packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
+        }
 
         LaunchedEffect(adSkipTriggerIdState) {
             if (adSkipTriggerIdState > 0) {
@@ -506,9 +513,8 @@ class PlayerViewController(private val rootView: View) {
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Kontrol Navigasi Media: HANYA ditampilkan saat mode Offline aktif!
-                    // Saat mode Online, navigasi Prev/Play/Next sudah ada langsung di player bar YouTube Music.
-                    if (offlineVisibleState) {
+                    // Kontrol Navigasi Media: Ditampilkan saat mode Offline atau pada Android TV / perangkat non-touchscreen
+                    if (offlineVisibleState || isTvMode) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -544,6 +550,7 @@ class PlayerViewController(private val rootView: View) {
                                     containerColor = ytmCrimson,
                                     contentColor = Color.White
                                 ),
+                                border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.5f)),
                                 elevation = ButtonDefaults.buttonElevation(
                                     defaultElevation = 4.dp,
                                     pressedElevation = 1.dp

@@ -20,6 +20,18 @@ class KeepAliveWebView @JvmOverloads constructor(
         isFocusableInTouchMode = true
     }
 
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN) {
+            val root = rootView
+            val composeDock = root?.findViewById<View>(R.id.composeControlDock)
+            if (composeDock != null && !composeDock.hasFocus()) {
+                composeDock.requestFocus()
+                return true
+            }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!hasFocus()) {
             requestFocus()

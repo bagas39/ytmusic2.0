@@ -23,8 +23,12 @@ class MainActivity : AppCompatActivity() {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             window.colorMode = android.content.pm.ActivityInfo.COLOR_MODE_DEFAULT
         }
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            window.setDesiredHdrHeadroom(1.0f)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            try {
+                window.setDesiredHdrHeadroom(1.0f)
+            } catch (_: Throwable) {
+                // Diabaikan jika framework OEM tertentu belum mendukung method ini
+            }
         }
 
         coordinator = AppCoordinator(this)
@@ -49,6 +53,41 @@ class MainActivity : AppCompatActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         coordinator.onWindowFocusChanged(hasFocus)
+    }
+
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (event.action == android.view.KeyEvent.ACTION_DOWN) {
+            when (event.keyCode) {
+                android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                android.view.KeyEvent.KEYCODE_HEADSETHOOK -> {
+                    coordinator.handlePlayPause()
+                    return true
+                }
+                android.view.KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                    coordinator.handlePause()
+                    return true
+                }
+                android.view.KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                    coordinator.handlePlay()
+                    return true
+                }
+                android.view.KeyEvent.KEYCODE_MEDIA_STOP -> {
+                    coordinator.handlePause()
+                    return true
+                }
+                android.view.KeyEvent.KEYCODE_MEDIA_NEXT,
+                android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
+                    coordinator.handleNext()
+                    return true
+                }
+                android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+                android.view.KeyEvent.KEYCODE_MEDIA_REWIND -> {
+                    coordinator.handlePrevious()
+                    return true
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onPause() {
