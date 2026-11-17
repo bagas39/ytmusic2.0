@@ -285,6 +285,10 @@ class OfflinePlayerManager {
         } catch (_: Exception) {}
     }
 
+    fun seekTo(positionMs: Long) {
+        seekTo(positionMs.toInt())
+    }
+
     fun setUserTrackingSeekBar(isTracking: Boolean) {
         isUserTrackingSeekBar = isTracking
     }
@@ -304,6 +308,8 @@ class OfflinePlayerManager {
         stop()
     }
 
+    private var lastProgressLogMs: Long = 0L
+
     private fun startSeekUpdater() {
         stopSeekUpdater()
         seekRunnable = object : Runnable {
@@ -314,10 +320,15 @@ class OfflinePlayerManager {
                         if (mp.isPlaying && !isUserTrackingSeekBar) {
                             val pos = mp.currentPosition
                             val dur = mp.duration
+                            val now = System.currentTimeMillis()
+                            if (now - lastProgressLogMs >= 1000L) {
+                                lastProgressLogMs = now
+                                Log.d("YTM-PROGRESS", "Offline position: $pos ms / $dur ms")
+                            }
                             onProgressTick?.invoke(pos, dur)
                         }
                     } catch (_: Exception) {}
-                    seekHandler.postDelayed(this, 500)
+                    seekHandler.postDelayed(this, 250)
                 }
             }
         }

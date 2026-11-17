@@ -45,8 +45,34 @@ class AppCoordinator(private val activity: AppCompatActivity) {
 
     private var currentOnlineTitle: String = ""
     private var currentOnlineArtist: String = ""
+    private var currentOnlinePositionMs: Long = 0L
+    private var currentOnlineDurationMs: Long = 0L
     private var sleepTimer: CountDownTimer? = null
     private var sleepTimerRemainingMs: Long = 0L
+
+    /**
+     * Listener posisi detik lagu real-time untuk sinkronisasi lirik berjalan (karaoke mode)
+     * dan seek tracking terpadu baik saat Online (WebView) maupun Offline (MediaPlayer).
+     */
+    var onPlaybackProgress: ((positionMs: Long, durationMs: Long) -> Unit)? = null
+
+    val currentPositionMs: Long
+        get() = if (::offlinePlayer.isInitialized && offlinePlayer.isOfflineActive) {
+            offlinePlayer.currentPositionMs
+        } else {
+            currentOnlinePositionMs
+        }
+
+    val currentDurationMs: Long
+        get() = if (::offlinePlayer.isInitialized && offlinePlayer.isOfflineActive) {
+            offlinePlayer.currentDurationMs
+        } else {
+            currentOnlineDurationMs
+        }
+
+    fun seekTo(positionMs: Long) {
+        handleSeekTo(positionMs)
+    }
 
     fun onCreate() {
         // 1. Cek & minta izin notifikasi serta optimasi baterai, lalu jalankan Foreground Service
@@ -162,6 +188,11 @@ class AppCoordinator(private val activity: AppCompatActivity) {
             onSongStateChanged = { metadata ->
                 currentOnlineTitle = metadata.title
                 currentOnlineArtist = metadata.artist
+                currentOnlinePositionMs = metadata.positionMs
+                currentOnlineDurationMs = metadata.durationMs
+                if (!offlinePlayer.isOfflineActive) {
+                    onPlaybackProgress?.invoke(metadata.positionMs, metadata.durationMs)
+                }
                 streamOptimizer.updateTrackTitle(metadata.title)
                 // Jika sedang mode offline dan user memutar lagu di webview YTM:
                 if (offlinePlayer.isOfflineActive) {
@@ -187,6 +218,13 @@ class AppCoordinator(private val activity: AppCompatActivity) {
                         artworkSource = metadata.artworkUrl,
                         forceUpdate = true
                     )
+                }
+            }
+            onPlaybackProgressChanged = { posMs, durMs ->
+                currentOnlinePositionMs = posMs
+                currentOnlineDurationMs = durMs
+                if (!offlinePlayer.isOfflineActive) {
+                    onPlaybackProgress?.invoke(posMs, durMs)
                 }
             }
         }
@@ -223,8 +261,11 @@ class AppCoordinator(private val activity: AppCompatActivity) {
                     )
                 }
             }
-            onProgressTick = { currentMs, _ ->
+            onProgressTick = { currentMs, totalMs ->
                 viewController.updateProgress(currentMs)
+                if (offlinePlayer.isOfflineActive) {
+                    onPlaybackProgress?.invoke(currentMs.toLong(), totalMs.toLong())
+                }
             }
             onPlayerStopped = {
                 viewController.hideOfflinePlayer()
@@ -363,11 +404,15 @@ class AppCoordinator(private val activity: AppCompatActivity) {
     }
 
     fun handleSeekTo(positionMs: Long) {
+        val safePos = positionMs.coerceAtLeast(0L)
         if (offlinePlayer.isOfflineActive) {
-            offlinePlayer.seekTo(positionMs.toInt())
-            viewController.updateProgress(positionMs.toInt())
+            offlinePlayer.seekTo(safePos)
+            viewController.updateProgress(safePos.toInt())
+            onPlaybackProgress?.invoke(safePos, offlinePlayer.currentDurationMs)
         } else {
-            webManager.seekTo(positionMs)
+            webManager.seekTo(safePos)
+            currentOnlinePositionMs = safePos
+            onPlaybackProgress?.invoke(safePos, currentOnlineDurationMs)
         }
     }
 

@@ -15,6 +15,7 @@ import java.io.ByteArrayInputStream
 class YtmWebManager(private val webView: KeepAliveWebView) {
 
     var onSongStateChanged: ((SongMetadata) -> Unit)? = null
+    var onPlaybackProgressChanged: ((positionMs: Long, durationMs: Long) -> Unit)? = null
     var onTitleDetected: ((String) -> Unit)? = null
     var onPageLifecycleInject: (() -> Unit)? = null
 
@@ -149,6 +150,20 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                         )
                     )
                 }
+            }
+
+            private var lastProgressLogMs: Long = 0L
+
+            @JavascriptInterface
+            fun onPlaybackProgress(positionMs: Long, durationMs: Long) {
+                val safePos = positionMs.coerceAtLeast(0L)
+                val safeDur = durationMs.coerceAtLeast(0L)
+                val now = System.currentTimeMillis()
+                if (now - lastProgressLogMs >= 1000L) {
+                    lastProgressLogMs = now
+                    Log.d("YTM-PROGRESS", "Online position: $safePos ms / $safeDur ms")
+                }
+                onPlaybackProgressChanged?.invoke(safePos, safeDur)
             }
         }, "AndroidBridge")
     }
@@ -364,7 +379,17 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
 
     fun seekTo(positionMs: Long) {
         val seconds = positionMs.coerceAtLeast(0L) / 1000.0
-        executeJs("var v = document.querySelector('video'); if (v && isFinite(v.duration)) { v.currentTime = $seconds; }")
+        executeJs(
+            """
+            var v = document.querySelector('video');
+            if (v && isFinite(v.duration)) {
+                v.currentTime = $seconds;
+                if (window.AndroidBridge && window.AndroidBridge.onPlaybackProgress) {
+                    window.AndroidBridge.onPlaybackProgress($positionMs, Math.round(v.duration * 1000));
+                }
+            }
+            """.trimIndent()
+        )
     }
 
     fun captureCurrentSong() {
@@ -1110,6 +1135,15 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                     var expectedPosMs = (window._lastReportedPos || 0) + (window._lastReportedPlay ? (nowMs - (window._lastReportTime || nowMs)) : 0);
                     var isSeekJump = Math.abs(posMs - expectedPosMs) > 3500;
                     var isDurChanged = Math.abs(durMs - (window._lastReportedDur || 0)) > 1500;
+
+                    // Laporkan posisi detik lagu secara berkala (250ms) untuk sinkronisasi lirik berjalan
+                    var lastProgressTime = window._lastProgressReportTime || 0;
+                    if ((isPlay && (nowMs - lastProgressTime >= 250)) || isSeekJump) {
+                        window._lastProgressReportTime = nowMs;
+                        if (window.AndroidBridge && window.AndroidBridge.onPlaybackProgress) {
+                            window.AndroidBridge.onPlaybackProgress(posMs, durMs);
+                        }
+                    }
 
                     if (sTitle && (
                         sTitle !== window._lastReportedTitle ||
