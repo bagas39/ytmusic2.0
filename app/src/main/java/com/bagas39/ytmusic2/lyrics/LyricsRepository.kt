@@ -168,6 +168,8 @@ object LyricsRepository {
     /**
      * Mengambil lirik secara asynchronous: memprioritaskan file `.lrc` lokal di `YTMusic2/Lyrics/`,
      * lalu memory cache, dan terakhir rantai API (LRCLIB -> NetEase -> KuGou -> Lyrics.ovh).
+     * Jika [ignoreLocalCache] bernilai `true`, pencarian melewati cache lokal & memori untuk
+     * mengambil ulang lirik dari jaringan (misal saat pencarian manual kata kunci baru).
      * Hasil dikirim kembali ke main thread melalui [onResult].
      */
     fun getLyricsAsync(
@@ -175,6 +177,7 @@ object LyricsRepository {
         artist: String = "",
         durationMs: Long = 0L,
         offlineFile: File? = null,
+        ignoreLocalCache: Boolean = false,
         onResult: (LyricsResult?) -> Unit
     ) {
         if (title.isBlank() && offlineFile == null) {
@@ -188,8 +191,8 @@ object LyricsRepository {
 
         thread(name = "ytm-lyrics-fetch") {
             val result = try {
-                // 1. Cek file .lrc lokal terlebih dahulu
-                val localFile = findLocalLrcFile(effectiveTitle, offlineFile)
+                // 1. Cek file .lrc lokal terlebih dahulu kecuali dipaksa cari ulang
+                val localFile = if (!ignoreLocalCache) findLocalLrcFile(effectiveTitle, offlineFile) else null
                 if (localFile != null) {
                     val raw = localFile.readText(Charsets.UTF_8)
                     parseLrcToResult(
@@ -198,8 +201,9 @@ object LyricsRepository {
                         artist = cleanArtist
                     )?.also { memoryCache.put(cacheKey, it) }
                 } else {
-                    // 2. Cek in-memory LRU cache, atau 3. Ambil dari rantai penyedia lirik
-                    val resolved = memoryCache.get(cacheKey)
+                    // 2. Cek in-memory LRU cache (bila tidak force-refresh), atau 3. Ambil dari penyedia lirik
+                    val cached = if (!ignoreLocalCache) memoryCache.get(cacheKey) else null
+                    val resolved = cached
                         ?: fetchLyricsWithFallbacks(cleanTitle, cleanArtist, durationMs)?.also { fetched ->
                             memoryCache.put(cacheKey, fetched)
                         }

@@ -104,6 +104,16 @@ class PlayerViewController(private val rootView: View) {
     private var dataSaverEnabledState by mutableStateOf(false)
     private var audioQualityState by mutableStateOf(AudioQuality.AUTO)
 
+    // Karaoke Lyrics Sheet States
+    private var lyricsSheetVisibleState by mutableStateOf(false)
+    private var lyricsContentState by mutableStateOf<LyricsUiState>(LyricsUiState.Idle)
+    private var lyricsTrackTitleState by mutableStateOf("")
+    private var lyricsTrackArtistState by mutableStateOf("")
+    private var lyricsPositionMsState by mutableLongStateOf(0L)
+    private var lyricsDurationMsState by mutableLongStateOf(0L)
+    private var lyricsIsPlayingState by mutableStateOf(false)
+    private var offlineHasLocalLyricsState by mutableStateOf(false)
+
     // Hoisted Events / Callbacks
     var onPreviousClicked: (() -> Unit)? = null
     var onPlayPauseClicked: (() -> Unit)? = null
@@ -118,9 +128,16 @@ class PlayerViewController(private val rootView: View) {
     var onSeekTo: ((progressMs: Int) -> Unit)? = null
     var onDataSaverToggled: ((Boolean) -> Unit)? = null
     var onAudioQualityChanged: ((AudioQuality) -> Unit)? = null
+    var onLyricsClicked: (() -> Unit)? = null
+    var onLyricsRetryClicked: (() -> Unit)? = null
+    var onLyricsManualSearch: ((title: String, artist: String) -> Unit)? = null
+    var onLyricsSeekTo: ((positionMs: Long) -> Unit)? = null
 
     val isOfflinePlayerVisible: Boolean
         get() = offlineVisibleState
+
+    val isLyricsSheetVisible: Boolean
+        get() = lyricsSheetVisibleState
 
     init {
         setupComposeContent()
@@ -143,6 +160,24 @@ class PlayerViewController(private val rootView: View) {
             MaterialTheme(colorScheme = ytmDarkColorScheme) {
                 YtmModernControlDock()
                 AdStatsDialog()
+                KaraokeLyricsBottomSheet(
+                    visible = lyricsSheetVisibleState,
+                    uiState = lyricsContentState,
+                    trackTitle = lyricsTrackTitleState,
+                    trackArtist = lyricsTrackArtistState,
+                    currentPositionMs = lyricsPositionMsState,
+                    durationMs = lyricsDurationMsState,
+                    isPlaying = lyricsIsPlayingState,
+                    onDismiss = { lyricsSheetVisibleState = false },
+                    onRetry = { onLyricsRetryClicked?.invoke() },
+                    onManualSearch = { queryTitle, queryArtist ->
+                        onLyricsManualSearch?.invoke(queryTitle, queryArtist)
+                    },
+                    onSeekTo = { positionMs -> onLyricsSeekTo?.invoke(positionMs) },
+                    onPrevious = { onPreviousClicked?.invoke() },
+                    onPlayPause = { onPlayPauseClicked?.invoke() },
+                    onNext = { onNextClicked?.invoke() }
+                )
             }
         }
     }
@@ -430,6 +465,33 @@ class PlayerViewController(private val rootView: View) {
 
                                 Spacer(modifier = Modifier.width(6.dp))
 
+                                val offlineLyricsHighlight = lyricsSheetVisibleState || offlineHasLocalLyricsState
+                                val offlineLyricsBg = if (offlineLyricsHighlight) Color(0xFF3D1620) else Color(0xFF24242C)
+                                val offlineLyricsBorder = if (offlineLyricsHighlight) ytmCrimsonLight else Color(0xFF33333F)
+                                val offlineLyricsColor = if (offlineLyricsHighlight) ytmCrimsonLight else Color(0xFFE5E5E5)
+
+                                Surface(
+                                    onClick = { onLyricsClicked?.invoke() },
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = offlineLyricsBg,
+                                    border = BorderStroke(1.dp, offlineLyricsBorder),
+                                    modifier = Modifier.height(28.dp)
+                                ) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier.padding(horizontal = 8.dp)
+                                    ) {
+                                        Text(
+                                            text = "Lirik",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = offlineLyricsColor
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(6.dp))
+
                                 Surface(
                                     onClick = { onOfflineCloseClicked?.invoke() },
                                     shape = CircleShape,
@@ -587,7 +649,7 @@ class PlayerViewController(private val rootView: View) {
                         }
                     }
 
-                    // Baris Aksi Cepat: Unduh, Offline, Sleep Timer (3 Kolom Seimbang)
+                    // Baris Aksi Cepat: Unduh, Lirik, Offline, Sleep Timer (4 Kolom Seimbang)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -611,6 +673,32 @@ class PlayerViewController(private val rootView: View) {
                                 text = "⬇ Unduh",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium,
+                                maxLines = 1
+                            )
+                        }
+
+                        // Tombol Lirik (Karaoke Bottom Sheet)
+                        val lyricsActiveBg = if (lyricsSheetVisibleState) Color(0xFF33121B) else Color(0xFF17171D)
+                        val lyricsActiveBorder = if (lyricsSheetVisibleState) ytmCrimsonLight else subtleBorder
+                        val lyricsActiveText = if (lyricsSheetVisibleState) ytmCrimsonLight else Color(0xFFEAEAEA)
+
+                        OutlinedButton(
+                            onClick = { onLyricsClicked?.invoke() },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(42.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = lyricsActiveBg,
+                                contentColor = lyricsActiveText
+                            ),
+                            border = BorderStroke(1.dp, lyricsActiveBorder),
+                            contentPadding = PaddingValues(horizontal = 6.dp)
+                        ) {
+                            Text(
+                                text = "Lirik",
+                                fontSize = 12.sp,
+                                fontWeight = if (lyricsSheetVisibleState) FontWeight.Bold else FontWeight.Medium,
                                 maxLines = 1
                             )
                         }
@@ -979,5 +1067,60 @@ class PlayerViewController(private val rootView: View) {
 
     fun setAudioQuality(quality: AudioQuality) {
         audioQualityState = quality
+    }
+
+    /**
+     * Membuka panel bottom sheet lirik karaoke.
+     */
+    fun showLyricsSheet() {
+        lyricsSheetVisibleState = true
+    }
+
+    /**
+     * Menutup panel bottom sheet lirik karaoke.
+     */
+    fun hideLyricsSheet() {
+        lyricsSheetVisibleState = false
+    }
+
+    /**
+     * Memperbarui state konten lirik (Idle, Loading, Ready, atau NotFound).
+     */
+    fun setLyricsUiState(state: LyricsUiState) {
+        lyricsContentState = state
+    }
+
+    /**
+     * Menandai apakah file audio offline yang sedang diputar memiliki file `.lrc` lokal.
+     */
+    fun setOfflineHasLocalLyrics(hasLyrics: Boolean) {
+        offlineHasLocalLyricsState = hasLyrics
+    }
+
+    /**
+     * Memperbarui metadata lagu aktif dan progres pemutaran pada panel lirik.
+     */
+    fun updateLyricsTrackMeta(
+        title: String,
+        artist: String,
+        isPlaying: Boolean,
+        positionMs: Long,
+        durationMs: Long
+    ) {
+        lyricsTrackTitleState = title
+        lyricsTrackArtistState = artist
+        lyricsIsPlayingState = isPlaying
+        lyricsPositionMsState = positionMs.coerceAtLeast(0L)
+        lyricsDurationMsState = durationMs.coerceAtLeast(0L)
+    }
+
+    /**
+     * Memperbarui posisi detik lagu saat ini secara real-time untuk auto-scroll & sorotan lirik.
+     */
+    fun updateLyricsPlaybackProgress(positionMs: Long, durationMs: Long) {
+        lyricsPositionMsState = positionMs.coerceAtLeast(0L)
+        if (durationMs > 0L) {
+            lyricsDurationMsState = durationMs
+        }
     }
 }

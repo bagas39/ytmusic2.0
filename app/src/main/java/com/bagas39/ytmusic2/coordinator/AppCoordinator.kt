@@ -15,6 +15,7 @@ import com.bagas39.ytmusic2.player.AudioQuality
 import com.bagas39.ytmusic2.player.OfflinePlayerManager
 import com.bagas39.ytmusic2.webview.StreamMediaOptimizer
 import com.bagas39.ytmusic2.ui.dialog.AppDialogManager
+import com.bagas39.ytmusic2.ui.view.LyricsUiState
 import com.bagas39.ytmusic2.ui.view.PlayerViewController
 import com.bagas39.ytmusic2.util.FileUtils
 import com.bagas39.ytmusic2.util.FormatUtils
@@ -45,10 +46,13 @@ class AppCoordinator(private val activity: AppCompatActivity) {
 
     private var currentOnlineTitle: String = ""
     private var currentOnlineArtist: String = ""
+    private var currentOnlineIsPlaying: Boolean = false
     private var currentOnlinePositionMs: Long = 0L
     private var currentOnlineDurationMs: Long = 0L
     private var sleepTimer: CountDownTimer? = null
     private var sleepTimerRemainingMs: Long = 0L
+    private var lastLoadedLyricsKey: String = ""
+    private var lyricsRequestSeq: Long = 0L
 
     /**
      * Listener posisi detik lagu real-time untuk sinkronisasi lirik berjalan (karaoke mode)
@@ -186,11 +190,19 @@ class AppCoordinator(private val activity: AppCompatActivity) {
                 streamOptimizer.updateTrackTitle(title)
             }
             onSongStateChanged = { metadata ->
+                val trackChanged = currentOnlineTitle != metadata.title || currentOnlineArtist != metadata.artist
                 currentOnlineTitle = metadata.title
                 currentOnlineArtist = metadata.artist
+                currentOnlineIsPlaying = metadata.isPlaying
                 currentOnlinePositionMs = metadata.positionMs
                 currentOnlineDurationMs = metadata.durationMs
                 if (!offlinePlayer.isOfflineActive) {
+                    activity.runOnUiThread {
+                        syncLyricsMetaToView()
+                        if (trackChanged && viewController.isLyricsSheetVisible) {
+                            loadLyricsForCurrentTrack(forceRefresh = false)
+                        }
+                    }
                     onPlaybackProgress?.invoke(metadata.positionMs, metadata.durationMs)
                 }
                 streamOptimizer.updateTrackTitle(metadata.title)
@@ -198,6 +210,12 @@ class AppCoordinator(private val activity: AppCompatActivity) {
                 if (offlinePlayer.isOfflineActive) {
                     if (metadata.isPlaying) {
                         offlinePlayer.stop()
+                        activity.runOnUiThread {
+                            syncLyricsMetaToView()
+                            if (viewController.isLyricsSheetVisible) {
+                                loadLyricsForCurrentTrack(forceRefresh = false)
+                            }
+                        }
                         updatePlaybackNotification(
                             title = metadata.title,
                             artist = metadata.artist,
@@ -224,6 +242,9 @@ class AppCoordinator(private val activity: AppCompatActivity) {
                 currentOnlinePositionMs = posMs
                 currentOnlineDurationMs = durMs
                 if (!offlinePlayer.isOfflineActive) {
+                    activity.runOnUiThread {
+                        viewController.updateLyricsPlaybackProgress(posMs, durMs)
+                    }
                     onPlaybackProgress?.invoke(posMs, durMs)
                 }
             }
@@ -233,6 +254,11 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         offlinePlayer = OfflinePlayerManager().apply {
             onTrackPrepared = { file, index, total, durationMs ->
                 viewController.showOfflinePlayer(file.nameWithoutExtension, durationMs)
+                viewController.setOfflineHasLocalLyrics(LyricsRepository.hasLocalLyrics(file))
+                syncLyricsMetaToView()
+                if (viewController.isLyricsSheetVisible) {
+                    loadLyricsForCurrentTrack(forceRefresh = false)
+                }
                 updatePlaybackNotification(
                     title = file.nameWithoutExtension,
                     artist = "Offline (${index + 1}/$total)",
@@ -244,6 +270,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
             }
             onPlaybackStateChanged = { isPlaying ->
                 viewController.updatePlayPauseButton(isPlaying)
+                syncLyricsMetaToView()
                 val song = offlinePlayer.currentSong
                 if (song != null) {
                     val artistText = if (offlinePlayer.playlistSize > 0 && offlinePlayer.currentIndex >= 0) {
@@ -264,11 +291,18 @@ class AppCoordinator(private val activity: AppCompatActivity) {
             onProgressTick = { currentMs, totalMs ->
                 viewController.updateProgress(currentMs)
                 if (offlinePlayer.isOfflineActive) {
+                    viewController.updateLyricsPlaybackProgress(currentMs.toLong(), totalMs.toLong())
                     onPlaybackProgress?.invoke(currentMs.toLong(), totalMs.toLong())
                 }
             }
             onPlayerStopped = {
                 viewController.hideOfflinePlayer()
+                viewController.setOfflineHasLocalLyrics(false)
+                syncLyricsMetaToView()
+                if (viewController.isLyricsSheetVisible) {
+                    lastLoadedLyricsKey = ""
+                    loadLyricsForCurrentTrack(forceRefresh = false)
+                }
                 val title = currentOnlineTitle.ifBlank { "YouTube Music" }
                 val artist = if (currentOnlineTitle.isNotBlank()) "Siap memutar" else "Tidak ada lagu yang diputar"
                 updatePlaybackNotification(
@@ -295,6 +329,12 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         viewController.onPlayPauseClicked = { handlePlayPause() }
         viewController.onNextClicked = { handleNext() }
         viewController.onDownloadClicked = { startDownloadProcess() }
+        viewController.onLyricsClicked = { openLyricsSheet() }
+        viewController.onLyricsRetryClicked = { loadLyricsForCurrentTrack(forceRefresh = true) }
+        viewController.onLyricsManualSearch = { queryTitle, queryArtist ->
+            loadLyricsCustomQuery(queryTitle, queryArtist)
+        }
+        viewController.onLyricsSeekTo = { positionMs -> handleSeekTo(positionMs) }
         viewController.onOfflineClicked = { showOfflineFiles() }
         viewController.onSleepTimerClicked = { showSleepTimerOptions() }
         viewController.onOfflineCloseClicked = { offlinePlayer.stop() }
@@ -408,11 +448,150 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         if (offlinePlayer.isOfflineActive) {
             offlinePlayer.seekTo(safePos)
             viewController.updateProgress(safePos.toInt())
+            viewController.updateLyricsPlaybackProgress(safePos, offlinePlayer.currentDurationMs)
             onPlaybackProgress?.invoke(safePos, offlinePlayer.currentDurationMs)
         } else {
             webManager.seekTo(safePos)
             currentOnlinePositionMs = safePos
+            viewController.updateLyricsPlaybackProgress(safePos, currentOnlineDurationMs)
             onPlaybackProgress?.invoke(safePos, currentOnlineDurationMs)
+        }
+    }
+
+    private fun syncLyricsMetaToView() {
+        val offlineSong = if (offlinePlayer.isOfflineActive) offlinePlayer.currentSong else null
+        if (offlineSong != null) {
+            val (cleanTitle, cleanArtist) = LyricsRepository.sanitizeTitleAndArtist(
+                offlineSong.nameWithoutExtension,
+                ""
+            )
+            viewController.updateLyricsTrackMeta(
+                title = cleanTitle.ifBlank { offlineSong.nameWithoutExtension },
+                artist = cleanArtist,
+                isPlaying = offlinePlayer.isPlaying,
+                positionMs = offlinePlayer.currentPositionMs,
+                durationMs = offlinePlayer.currentDurationMs
+            )
+        } else {
+            viewController.updateLyricsTrackMeta(
+                title = currentOnlineTitle,
+                artist = currentOnlineArtist,
+                isPlaying = currentOnlineIsPlaying,
+                positionMs = currentOnlinePositionMs,
+                durationMs = currentOnlineDurationMs
+            )
+        }
+    }
+
+    private fun openLyricsSheet() {
+        syncLyricsMetaToView()
+        viewController.showLyricsSheet()
+        loadLyricsForCurrentTrack(forceRefresh = false)
+    }
+
+    private fun loadLyricsForCurrentTrack(forceRefresh: Boolean) {
+        val offlineSong = if (offlinePlayer.isOfflineActive) offlinePlayer.currentSong else null
+        val isOffline = offlineSong != null
+        val rawTitle = if (isOffline) offlineSong!!.nameWithoutExtension else currentOnlineTitle
+        val rawArtist = if (isOffline) "" else currentOnlineArtist
+        val durationMs = if (isOffline) offlinePlayer.currentDurationMs else currentOnlineDurationMs
+
+        if (rawTitle.isBlank()) {
+            lastLoadedLyricsKey = ""
+            viewController.setLyricsUiState(LyricsUiState.Idle)
+            return
+        }
+
+        val trackKey = "$isOffline|${offlineSong?.absolutePath.orEmpty()}|$rawTitle|$rawArtist"
+        if (!forceRefresh && trackKey == lastLoadedLyricsKey) {
+            return
+        }
+
+        val (cleanTitle, cleanArtist) = LyricsRepository.sanitizeTitleAndArtist(rawTitle, rawArtist)
+        val displayTitle = cleanTitle.ifBlank { rawTitle }
+        val displayArtist = cleanArtist.ifBlank { rawArtist }
+        val requestId = ++lyricsRequestSeq
+
+        viewController.setLyricsUiState(LyricsUiState.Loading(displayTitle, displayArtist))
+
+        LyricsRepository.getLyricsAsync(
+            title = rawTitle,
+            artist = rawArtist,
+            durationMs = durationMs,
+            offlineFile = offlineSong,
+            ignoreLocalCache = forceRefresh
+        ) { result ->
+            if (requestId != lyricsRequestSeq) return@getLyricsAsync
+            if (result != null && result.lines.isNotEmpty()) {
+                lastLoadedLyricsKey = trackKey
+                val isSaved = offlineSong != null && LyricsRepository.hasLocalLyrics(offlineSong)
+                if (offlineSong != null) {
+                    viewController.setOfflineHasLocalLyrics(isSaved)
+                }
+                viewController.setLyricsUiState(
+                    LyricsUiState.Ready(
+                        result = result,
+                        isOfflineMode = isOffline,
+                        isSavedLocally = isSaved
+                    )
+                )
+            } else {
+                lastLoadedLyricsKey = ""
+                viewController.setLyricsUiState(
+                    LyricsUiState.NotFound(
+                        title = displayTitle,
+                        artist = displayArtist,
+                        reason = "Lirik tidak ditemukan di penyimpanan lokal maupun penyedia daring."
+                    )
+                )
+            }
+        }
+    }
+
+    private fun loadLyricsCustomQuery(queryTitle: String, queryArtist: String) {
+        val trimmedTitle = queryTitle.trim()
+        val trimmedArtist = queryArtist.trim()
+        if (trimmedTitle.isBlank()) return
+
+        val offlineSong = if (offlinePlayer.isOfflineActive) offlinePlayer.currentSong else null
+        val isOffline = offlineSong != null
+        val requestId = ++lyricsRequestSeq
+
+        viewController.setLyricsUiState(LyricsUiState.Loading(trimmedTitle, trimmedArtist))
+
+        LyricsRepository.getLyricsAsync(
+            title = trimmedTitle,
+            artist = trimmedArtist,
+            durationMs = currentDurationMs,
+            offlineFile = offlineSong,
+            ignoreLocalCache = true
+        ) { result ->
+            if (requestId != lyricsRequestSeq) return@getLyricsAsync
+            if (result != null && result.lines.isNotEmpty()) {
+                val trackTitle = if (isOffline) offlineSong!!.nameWithoutExtension else currentOnlineTitle
+                val trackArtist = if (isOffline) "" else currentOnlineArtist
+                lastLoadedLyricsKey = "$isOffline|${offlineSong?.absolutePath.orEmpty()}|$trackTitle|$trackArtist"
+                val isSaved = offlineSong != null && LyricsRepository.hasLocalLyrics(offlineSong)
+                if (offlineSong != null) {
+                    viewController.setOfflineHasLocalLyrics(isSaved)
+                }
+                viewController.setLyricsUiState(
+                    LyricsUiState.Ready(
+                        result = result,
+                        isOfflineMode = isOffline,
+                        isSavedLocally = isSaved
+                    )
+                )
+            } else {
+                lastLoadedLyricsKey = ""
+                viewController.setLyricsUiState(
+                    LyricsUiState.NotFound(
+                        title = trimmedTitle,
+                        artist = trimmedArtist,
+                        reason = "Tidak ada kecocokan lirik untuk kata kunci tersebut."
+                    )
+                )
+            }
         }
     }
 
@@ -527,6 +706,13 @@ class AppCoordinator(private val activity: AppCompatActivity) {
                         if (!lrcFile.exists()) {
                             LyricsRepository.saveLrcToFile(result.rawLrc, lrcFile)
                         }
+                        if (offlinePlayer.currentSong?.absolutePath == file.absolutePath) {
+                            viewController.setOfflineHasLocalLyrics(true)
+                            lastLoadedLyricsKey = ""
+                            if (viewController.isLyricsSheetVisible) {
+                                loadLyricsForCurrentTrack(forceRefresh = false)
+                            }
+                        }
                         val statusMsg = if (result.isSynced) {
                             "Lirik karaoke (.lrc) tersimpan di YTMusic2/Lyrics"
                         } else {
@@ -540,6 +726,10 @@ class AppCoordinator(private val activity: AppCompatActivity) {
             },
             onDeleteLyricsOnly = {
                 if (LyricsRepository.deleteLocalLyrics(file)) {
+                    if (offlinePlayer.currentSong?.absolutePath == file.absolutePath) {
+                        viewController.setOfflineHasLocalLyrics(false)
+                        lastLoadedLyricsKey = ""
+                    }
                     Toast.makeText(activity, "File lirik (.lrc) dihapus", Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(activity, "File lirik tidak ditemukan", Toast.LENGTH_SHORT).show()
@@ -736,6 +926,10 @@ class AppCoordinator(private val activity: AppCompatActivity) {
     }
 
     fun handleBackPressed(): Boolean {
+        if (viewController.isLyricsSheetVisible) {
+            viewController.hideLyricsSheet()
+            return true
+        }
         if (offlinePlayer.isOfflineActive || viewController.isOfflinePlayerVisible) {
             offlinePlayer.stop()
             viewController.hideOfflinePlayer()
