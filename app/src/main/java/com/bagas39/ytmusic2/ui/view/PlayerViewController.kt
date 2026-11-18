@@ -1,7 +1,10 @@
 package com.bagas39.ytmusic2.ui.view
 
 import android.app.Activity
+import android.app.UiModeManager
+import android.content.Context
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.view.View
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -53,12 +56,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -209,7 +216,13 @@ class PlayerViewController(private val rootView: View) {
 
         val context = LocalContext.current
         val isTvMode = remember {
-            !context.packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
+            val uiModeManager = context.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+            val isTvUiMode = uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+            @Suppress("DEPRECATION")
+            val hasTvFeature = context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
+                context.packageManager.hasSystemFeature(PackageManager.FEATURE_TELEVISION)
+            val noTouchscreen = !context.packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
+            isTvUiMode || hasTvFeature || noTouchscreen
         }
 
         LaunchedEffect(adSkipTriggerIdState) {
@@ -253,7 +266,13 @@ class PlayerViewController(private val rootView: View) {
                                 }
                             }
                         }
-                        .clickable { isDockExpanded = !isDockExpanded }
+                        .then(
+                            if (isTvMode && isDockExpanded) {
+                                Modifier.focusProperties { canFocus = false }
+                            } else {
+                                Modifier.clickable { isDockExpanded = !isDockExpanded }
+                            }
+                        )
                         .padding(vertical = if (isDockExpanded) 6.dp else 8.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -475,7 +494,9 @@ class PlayerViewController(private val rootView: View) {
                                     shape = RoundedCornerShape(14.dp),
                                     color = offlineLyricsBg,
                                     border = BorderStroke(1.dp, offlineLyricsBorder),
-                                    modifier = Modifier.height(28.dp)
+                                    modifier = Modifier
+                                        .height(28.dp)
+                                        .semantics { contentDescription = "Buka lirik lagu offline" }
                                 ) {
                                     Box(
                                         contentAlignment = Alignment.Center,
@@ -485,7 +506,9 @@ class PlayerViewController(private val rootView: View) {
                                             text = "Lirik",
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold,
-                                            color = offlineLyricsColor
+                                            color = offlineLyricsColor,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
                                 }
@@ -582,37 +605,30 @@ class PlayerViewController(private val rootView: View) {
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            OutlinedButton(
-                                onClick = { onPreviousClicked?.invoke() },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(44.dp),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = elevatedPill,
-                                    contentColor = Color.White
-                                ),
-                                border = BorderStroke(1.dp, subtleBorder),
-                                contentPadding = PaddingValues(horizontal = 8.dp)
-                            ) {
-                                Text(
-                                    text = "⏮  Prev",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
+                            DockMediaButton(
+                                label = "⏮  Prev",
+                                containerColor = elevatedPill,
+                                unfocusedBorder = subtleBorder,
+                                modifier = Modifier.weight(1f).height(44.dp),
+                                onClick = { onPreviousClicked?.invoke() }
+                            )
 
+                            var playFocused by remember { mutableStateOf(false) }
                             Button(
                                 onClick = { onPlayPauseClicked?.invoke() },
                                 modifier = Modifier
                                     .weight(1.35f)
-                                    .height(46.dp),
+                                    .height(46.dp)
+                                    .onFocusChanged { playFocused = it.hasFocus },
                                 shape = RoundedCornerShape(16.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = ytmCrimson,
                                     contentColor = Color.White
                                 ),
-                                border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.5f)),
+                                border = BorderStroke(
+                                    width = if (playFocused) 2.dp else 1.5.dp,
+                                    color = if (playFocused) Color.White else Color.White.copy(alpha = 0.5f)
+                                ),
                                 elevation = ButtonDefaults.buttonElevation(
                                     defaultElevation = 4.dp,
                                     pressedElevation = 1.dp
@@ -623,143 +639,69 @@ class PlayerViewController(private val rootView: View) {
                                     text = playPauseLabelState,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
-                                    maxLines = 1
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
 
-                            OutlinedButton(
-                                onClick = { onNextClicked?.invoke() },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(44.dp),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = elevatedPill,
-                                    contentColor = Color.White
-                                ),
-                                border = BorderStroke(1.dp, subtleBorder),
-                                contentPadding = PaddingValues(horizontal = 8.dp)
-                            ) {
-                                Text(
-                                    text = "Next  ⏭",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
+                            DockMediaButton(
+                                label = "Next  ⏭",
+                                containerColor = elevatedPill,
+                                unfocusedBorder = subtleBorder,
+                                modifier = Modifier.weight(1f).height(44.dp),
+                                onClick = { onNextClicked?.invoke() }
+                            )
                         }
                     }
 
                     // Baris Aksi Cepat: Unduh, Lirik, Offline, Sleep Timer (4 Kolom Seimbang)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Tombol Unduh
-                        OutlinedButton(
-                            onClick = { onDownloadClicked?.invoke() },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(42.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                containerColor = Color(0xFF17171D),
-                                contentColor = Color(0xFFEAEAEA)
-                            ),
-                            border = BorderStroke(1.dp, subtleBorder),
-                            contentPadding = PaddingValues(horizontal = 6.dp)
-                        ) {
-                            Text(
-                                text = "⬇ Unduh",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1
-                            )
-                        }
+                        DockQuickButton(
+                            label = "⬇ Unduh",
+                            isActive = false,
+                            accentColor = ytmCrimsonLight,
+                            subtleBorder = subtleBorder,
+                            modifier = Modifier.weight(1f),
+                            onClick = { onDownloadClicked?.invoke() }
+                        )
 
-                        // Tombol Lirik (Karaoke Bottom Sheet)
-                        val lyricsActiveBg = if (lyricsSheetVisibleState) Color(0xFF33121B) else Color(0xFF17171D)
-                        val lyricsActiveBorder = if (lyricsSheetVisibleState) ytmCrimsonLight else subtleBorder
-                        val lyricsActiveText = if (lyricsSheetVisibleState) ytmCrimsonLight else Color(0xFFEAEAEA)
+                        DockQuickButton(
+                            label = "♪ Lirik",
+                            isActive = lyricsSheetVisibleState,
+                            accentColor = ytmCrimsonLight,
+                            subtleBorder = subtleBorder,
+                            contentDescription = "Buka panel lirik",
+                            modifier = Modifier.weight(1f),
+                            onClick = { onLyricsClicked?.invoke() }
+                        )
 
-                        OutlinedButton(
-                            onClick = { onLyricsClicked?.invoke() },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(42.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                containerColor = lyricsActiveBg,
-                                contentColor = lyricsActiveText
-                            ),
-                            border = BorderStroke(1.dp, lyricsActiveBorder),
-                            contentPadding = PaddingValues(horizontal = 6.dp)
-                        ) {
-                            Text(
-                                text = "Lirik",
-                                fontSize = 12.sp,
-                                fontWeight = if (lyricsSheetVisibleState) FontWeight.Bold else FontWeight.Medium,
-                                maxLines = 1
-                            )
-                        }
+                        DockQuickButton(
+                            label = "🎵 Offline",
+                            isActive = offlineVisibleState,
+                            accentColor = ytmCrimsonLight,
+                            subtleBorder = subtleBorder,
+                            modifier = Modifier.weight(1f),
+                            onClick = { onOfflineClicked?.invoke() }
+                        )
 
-                        // Tombol Offline (Menyala saat mode offline aktif)
-                        val offlineActiveBg = if (offlineVisibleState) Color(0xFF33121B) else Color(0xFF17171D)
-                        val offlineActiveBorder = if (offlineVisibleState) ytmCrimsonLight else subtleBorder
-                        val offlineActiveText = if (offlineVisibleState) ytmCrimsonLight else Color(0xFFEAEAEA)
-
-                        OutlinedButton(
-                            onClick = { onOfflineClicked?.invoke() },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(42.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                containerColor = offlineActiveBg,
-                                contentColor = offlineActiveText
-                            ),
-                            border = BorderStroke(1.dp, offlineActiveBorder),
-                            contentPadding = PaddingValues(horizontal = 6.dp)
-                        ) {
-                            Text(
-                                text = "🎵 Offline",
-                                fontSize = 12.sp,
-                                fontWeight = if (offlineVisibleState) FontWeight.Bold else FontWeight.Medium,
-                                maxLines = 1
-                            )
-                        }
-
-                        // Tombol Sleep Timer (Menyala saat timer sedang berjalan)
                         val isTimerActive = sleepTimerRemainingMsState > 0L
-                        val timerBg = if (isTimerActive) Color(0xFF33161E) else Color(0xFF17171D)
-                        val timerBorder = if (isTimerActive) ytmCrimsonLight else subtleBorder
-                        val timerTextColor = if (isTimerActive) ytmCrimsonLight else Color(0xFFEAEAEA)
                         val timerLabel = if (isTimerActive) {
                             "⏲ ${FormatUtils.formatDuration(sleepTimerRemainingMsState.toInt())}"
                         } else {
                             "⏲ Timer"
                         }
-
-                        OutlinedButton(
-                            onClick = { onSleepTimerClicked?.invoke() },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(42.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                containerColor = timerBg,
-                                contentColor = timerTextColor
-                            ),
-                            border = BorderStroke(1.dp, timerBorder),
-                            contentPadding = PaddingValues(horizontal = 6.dp)
-                        ) {
-                            Text(
-                                text = timerLabel,
-                                fontSize = 12.sp,
-                                fontWeight = if (isTimerActive) FontWeight.Bold else FontWeight.Medium,
-                                maxLines = 1
-                            )
-                        }
+                        DockQuickButton(
+                            label = timerLabel,
+                            isActive = isTimerActive,
+                            accentColor = ytmCrimsonLight,
+                            subtleBorder = subtleBorder,
+                            modifier = Modifier.weight(1f),
+                            onClick = { onSleepTimerClicked?.invoke() }
+                        )
                     }
 
                     // Baris Status Minimalis & Penghemat Data
@@ -797,6 +739,90 @@ class PlayerViewController(private val rootView: View) {
         }
     }
 }
+    }
+
+    @Composable
+    private fun DockMediaButton(
+        label: String,
+        containerColor: Color,
+        unfocusedBorder: Color,
+        modifier: Modifier = Modifier,
+        onClick: () -> Unit
+    ) {
+        var isFocused by remember { mutableStateOf(false) }
+        OutlinedButton(
+            onClick = onClick,
+            modifier = modifier.onFocusChanged { isFocused = it.hasFocus },
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = containerColor,
+                contentColor = Color.White
+            ),
+            border = BorderStroke(
+                width = if (isFocused) 1.5.dp else 1.dp,
+                color = if (isFocused) Color.White else unfocusedBorder
+            ),
+            contentPadding = PaddingValues(horizontal = 8.dp)
+        ) {
+            Text(
+                text = label,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+
+    @Composable
+    private fun DockQuickButton(
+        label: String,
+        isActive: Boolean,
+        accentColor: Color,
+        subtleBorder: Color,
+        modifier: Modifier = Modifier,
+        contentDescription: String? = null,
+        onClick: () -> Unit
+    ) {
+        var isFocused by remember { mutableStateOf(false) }
+        val bgColor = if (isActive) Color(0xFF33121B) else Color(0xFF17171D)
+        val borderColor = when {
+            isFocused -> Color.White
+            isActive -> accentColor
+            else -> subtleBorder
+        }
+        val textColor = if (isActive) accentColor else Color(0xFFEAEAEA)
+
+        OutlinedButton(
+            onClick = onClick,
+            modifier = modifier
+                .height(44.dp)
+                .onFocusChanged { isFocused = it.hasFocus }
+                .then(
+                    if (contentDescription != null) {
+                        Modifier.semantics(mergeDescendants = true) {
+                            this.contentDescription = contentDescription
+                        }
+                    } else {
+                        Modifier
+                    }
+                ),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = bgColor,
+                contentColor = textColor
+            ),
+            border = BorderStroke(width = if (isFocused) 1.5.dp else 1.dp, color = borderColor),
+            contentPadding = PaddingValues(horizontal = 4.dp)
+        ) {
+            Text(
+                text = label,
+                fontSize = 11.5.sp,
+                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
 
     @Composable

@@ -32,9 +32,11 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -58,8 +60,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -83,6 +88,7 @@ import com.bagas39.ytmusic2.lyrics.LyricLine
 import com.bagas39.ytmusic2.lyrics.LyricsResult
 import com.bagas39.ytmusic2.util.FormatUtils
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -154,10 +160,36 @@ fun KaraokeLyricsBottomSheet(
     onPlayPause: () -> Unit,
     onNext: () -> Unit
 ) {
-    if (!visible) return
-
+    var isRendered by remember { mutableStateOf(visible) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var isManualSearchOpen by remember { mutableStateOf(false) }
+    val headerFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(visible) {
+        if (visible) {
+            isRendered = true
+        } else if (isRendered) {
+            try {
+                if (sheetState.isVisible) {
+                    sheetState.hide()
+                }
+            } finally {
+                isRendered = false
+                isManualSearchOpen = false
+            }
+        }
+    }
+
+    LaunchedEffect(isRendered) {
+        if (isRendered) {
+            delay(150L)
+            try {
+                headerFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
+    }
+
+    if (!visible && !isRendered) return
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -205,6 +237,7 @@ fun KaraokeLyricsBottomSheet(
                     trackTitle = trackTitle,
                     trackArtist = trackArtist,
                     isManualSearchOpen = isManualSearchOpen,
+                    initialFocusRequester = headerFocusRequester,
                     onToggleManualSearch = { isManualSearchOpen = !isManualSearchOpen },
                     onDismiss = onDismiss
                 )
@@ -286,6 +319,7 @@ private fun LyricsSheetHeader(
     trackTitle: String,
     trackArtist: String,
     isManualSearchOpen: Boolean,
+    initialFocusRequester: FocusRequester,
     onToggleManualSearch: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -341,6 +375,7 @@ private fun LyricsSheetHeader(
                     val sourceLabel = when {
                         uiState.isOfflineMode && uiState.isSavedLocally -> "Offline (.lrc lokal)"
                         uiState.isOfflineMode -> "Pemutar Offline"
+                        trackTitle.isBlank() -> "Pencarian Manual"
                         else -> "Streaming Online"
                     }
                     StatusTag(text = sourceLabel, isAccent = false)
@@ -359,48 +394,19 @@ private fun LyricsSheetHeader(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            OutlinedButton(
+            LyricsFocusOutlinedButton(
+                text = "Cari",
                 onClick = onToggleManualSearch,
-                modifier = Modifier
-                    .defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
-                    .semantics { contentDescription = "Cari lirik manual" },
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(
-                    width = 1.dp,
-                    color = if (isManualSearchOpen) LyricsPalette.ActiveLineBorder else LyricsPalette.ControlBorder
-                ),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = if (isManualSearchOpen) LyricsPalette.ActiveLineBg else LyricsPalette.ControlSurface,
-                    contentColor = if (isManualSearchOpen) LyricsPalette.AccentText else LyricsPalette.TextPrimary
-                ),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-            ) {
-                Text(
-                    text = "Cari",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
+                isActive = isManualSearchOpen,
+                contentDescriptionText = "Cari lirik manual"
+            )
 
-            OutlinedButton(
+            LyricsFocusOutlinedButton(
+                text = "Tutup",
                 onClick = onDismiss,
-                modifier = Modifier
-                    .defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
-                    .semantics { contentDescription = "Tutup panel lirik" },
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, LyricsPalette.ControlBorder),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = LyricsPalette.ControlSurface,
-                    contentColor = LyricsPalette.TextPrimary
-                ),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-            ) {
-                Text(
-                    text = "Tutup",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
+                modifier = Modifier.focusRequester(initialFocusRequester),
+                contentDescriptionText = "Tutup panel lirik"
+            )
         }
     }
 }
@@ -432,8 +438,8 @@ private fun ManualLyricsSearchForm(
     onSubmit: (title: String, artist: String) -> Unit,
     onCancel: () -> Unit
 ) {
-    var titleQuery by remember(initialTitle) { mutableStateOf(initialTitle) }
-    var artistQuery by remember(initialArtist) { mutableStateOf(initialArtist) }
+    var titleQuery by remember { mutableStateOf(initialTitle) }
+    var artistQuery by remember { mutableStateOf(initialArtist) }
 
     val fieldColors = OutlinedTextFieldDefaults.colors(
         focusedTextColor = LyricsPalette.TextPrimary,
@@ -542,6 +548,7 @@ private fun LyricsSyncedContent(
     }
 
     var isAutoScrollPaused by remember(result) { mutableStateOf(false) }
+    var focusedLineIndex by remember(result) { mutableStateOf(-1) }
     var isProgrammaticScroll by remember(result) { mutableStateOf(false) }
 
     LaunchedEffect(result) {
@@ -557,17 +564,18 @@ private fun LyricsSyncedContent(
         }
     }
 
-    LaunchedEffect(isAutoScrollPaused) {
-        if (isAutoScrollPaused) {
+    LaunchedEffect(isAutoScrollPaused, focusedLineIndex) {
+        if (isAutoScrollPaused && focusedLineIndex < 0) {
             delay(4000L)
             isAutoScrollPaused = false
         }
     }
 
-    LaunchedEffect(activeIndex, isAutoScrollPaused, result) {
-        if (result.isSynced && activeIndex >= 0 && !isAutoScrollPaused) {
-            val viewportHeight = listState.layoutInfo.viewportSize.height
-            val upperThirdOffset = if (viewportHeight > 0) -(viewportHeight / 4) else 0
+    LaunchedEffect(activeIndex, isAutoScrollPaused, focusedLineIndex, result) {
+        if (result.isSynced && activeIndex >= 0 && !isAutoScrollPaused && focusedLineIndex < 0) {
+            val viewportHeight = listState.layoutInfo.viewportSize.height.takeIf { it > 0 }
+                ?: snapshotFlow { listState.layoutInfo.viewportSize.height }.first { it > 0 }
+            val upperThirdOffset = -(viewportHeight / 4)
             isProgrammaticScroll = true
             try {
                 listState.animateScrollToItem(
@@ -623,8 +631,20 @@ private fun LyricsSyncedContent(
                         isSynced = result.isSynced,
                         isActive = isActive,
                         isPast = isPast,
+                        onFocusChanged = { hasFocus ->
+                            // Jeda auto-scroll saat D-Pad menjelajahi baris agar baris terfokus tidak terbuang keluar layar
+                            if (hasFocus) {
+                                focusedLineIndex = index
+                                if (result.isSynced) {
+                                    isAutoScrollPaused = true
+                                }
+                            } else if (focusedLineIndex == index) {
+                                focusedLineIndex = -1
+                            }
+                        },
                         onClick = {
                             if (result.isSynced && line.timeMs >= 0L) {
+                                focusedLineIndex = -1
                                 isAutoScrollPaused = false
                                 onSeekTo(line.timeMs)
                             }
@@ -634,8 +654,10 @@ private fun LyricsSyncedContent(
             }
 
             if (result.isSynced && isAutoScrollPaused && activeIndex >= 0) {
+                var isFollowFocused by remember { mutableStateOf(false) }
                 Button(
                     onClick = {
+                        focusedLineIndex = -1
                         isAutoScrollPaused = false
                         coroutineScope.launch {
                             val viewportHeight = listState.layoutInfo.viewportSize.height
@@ -649,6 +671,7 @@ private fun LyricsSyncedContent(
                         }
                     },
                     shape = RoundedCornerShape(22.dp),
+                    border = if (isFollowFocused) BorderStroke(1.5.dp, LyricsPalette.FocusRing) else null,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = LyricsPalette.CrimsonPrimary,
                         contentColor = Color.White
@@ -657,6 +680,7 @@ private fun LyricsSyncedContent(
                         .align(Alignment.BottomCenter)
                         .padding(bottom = 14.dp)
                         .defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
+                        .onFocusChanged { isFollowFocused = it.hasFocus }
                 ) {
                     Text(
                         text = "Ikuti Lirik Aktif",
@@ -675,6 +699,7 @@ private fun LyricLineItem(
     isSynced: Boolean,
     isActive: Boolean,
     isPast: Boolean,
+    onFocusChanged: (Boolean) -> Unit,
     onClick: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
@@ -705,7 +730,8 @@ private fun LyricLineItem(
         else -> FontWeight.Normal
     }
 
-    val timeLabel = if (isSynced && line.timeMs >= 0L) {
+    val isInteractiveLine = isSynced && line.timeMs >= 0L
+    val timeLabel = if (isInteractiveLine) {
         FormatUtils.formatDuration(line.timeMs.toInt())
     } else {
         ""
@@ -714,23 +740,26 @@ private fun LyricLineItem(
     val rowModifier = Modifier
         .fillMaxWidth()
         .heightIn(min = 48.dp)
-        .onFocusChanged { isFocused = it.isFocused }
+        .onFocusChanged { focusState ->
+            isFocused = focusState.hasFocus
+            onFocusChanged(focusState.hasFocus)
+        }
         .then(
-            if (isSynced && line.timeMs >= 0L) {
+            if (isInteractiveLine) {
+                Modifier.semantics {
+                    selected = isActive
+                    contentDescription = "Detik $timeLabel, ${line.text}, ketuk untuk lompat ke bagian ini"
+                }
+            } else {
                 Modifier
                     .focusable()
                     .semantics {
-                        selected = isActive
-                        contentDescription = "Detik $timeLabel, ${line.text}, ketuk untuk lompat ke bagian ini"
+                        contentDescription = line.text
                     }
-            } else {
-                Modifier.semantics {
-                    contentDescription = line.text
-                }
             }
         )
 
-    if (isSynced && line.timeMs >= 0L) {
+    if (isInteractiveLine) {
         Surface(
             onClick = onClick,
             shape = RoundedCornerShape(12.dp),
@@ -752,6 +781,7 @@ private fun LyricLineItem(
         Surface(
             shape = RoundedCornerShape(10.dp),
             color = Color.Transparent,
+            border = if (isFocused) BorderStroke(1.5.dp, LyricsPalette.FocusRing) else null,
             modifier = rowModifier
         ) {
             LyricLineContent(
@@ -852,6 +882,7 @@ private fun LyricsEmptyState(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
@@ -910,6 +941,7 @@ private fun LyricsNotFoundState(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
@@ -1035,33 +1067,29 @@ private fun LyricsPlaybackFooter(
                 Spacer(modifier = Modifier.height(6.dp))
             }
 
+            var isPlayFocused by remember { mutableStateOf(false) }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedButton(
+                LyricsFocusOutlinedButton(
+                    text = "Prev",
                     onClick = onPrevious,
-                    modifier = Modifier
-                        .weight(1f)
-                        .defaultMinSize(minWidth = 44.dp, minHeight = 44.dp),
+                    modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, LyricsPalette.ControlBorder),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = LyricsPalette.ControlSurface,
-                        contentColor = LyricsPalette.TextPrimary
-                    ),
                     contentPadding = PaddingValues(horizontal = 8.dp)
-                ) {
-                    Text("Prev", fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-                }
+                )
 
                 Button(
                     onClick = onPlayPause,
                     modifier = Modifier
                         .weight(1.3f)
-                        .defaultMinSize(minWidth = 44.dp, minHeight = 44.dp),
+                        .defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
+                        .onFocusChanged { isPlayFocused = it.hasFocus },
                     shape = RoundedCornerShape(12.dp),
+                    border = if (isPlayFocused) BorderStroke(1.5.dp, LyricsPalette.FocusRing) else null,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = LyricsPalette.CrimsonPrimary,
                         contentColor = Color.White
@@ -1076,22 +1104,63 @@ private fun LyricsPlaybackFooter(
                     )
                 }
 
-                OutlinedButton(
+                LyricsFocusOutlinedButton(
+                    text = "Next",
                     onClick = onNext,
-                    modifier = Modifier
-                        .weight(1f)
-                        .defaultMinSize(minWidth = 44.dp, minHeight = 44.dp),
+                    modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, LyricsPalette.ControlBorder),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = LyricsPalette.ControlSurface,
-                        contentColor = LyricsPalette.TextPrimary
-                    ),
                     contentPadding = PaddingValues(horizontal = 8.dp)
-                ) {
-                    Text("Next", fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-                }
+                )
             }
         }
+    }
+}
+
+/**
+ * Tombol aksi sekunder di dalam panel lirik dengan cincin fokus D-Pad yang jelas untuk Android TV.
+ */
+@Composable
+private fun LyricsFocusOutlinedButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    isActive: Boolean = false,
+    shape: RoundedCornerShape = RoundedCornerShape(10.dp),
+    contentPadding: PaddingValues = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+    contentDescriptionText: String? = null
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    val borderColor = when {
+        isFocused -> LyricsPalette.FocusRing
+        isActive -> LyricsPalette.ActiveLineBorder
+        else -> LyricsPalette.ControlBorder
+    }
+
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier
+            .defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
+            .onFocusChanged { isFocused = it.hasFocus }
+            .then(
+                if (contentDescriptionText != null) {
+                    Modifier.semantics { contentDescription = contentDescriptionText }
+                } else {
+                    Modifier
+                }
+            ),
+        shape = shape,
+        border = BorderStroke(if (isFocused) 1.5.dp else 1.dp, borderColor),
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = if (isActive) LyricsPalette.ActiveLineBg else LyricsPalette.ControlSurface,
+            contentColor = if (isActive) LyricsPalette.AccentText else LyricsPalette.TextPrimary
+        ),
+        contentPadding = contentPadding
+    ) {
+        Text(
+            text = text,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1
+        )
     }
 }

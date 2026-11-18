@@ -85,6 +85,16 @@ class MainActivity : AppCompatActivity() {
                     coordinator.handlePrevious()
                     return true
                 }
+                android.view.KeyEvent.KEYCODE_MENU,
+                android.view.KeyEvent.KEYCODE_MEDIA_TOP_MENU -> {
+                    val dock = findViewById<android.view.View>(R.id.composeControlDock)
+                    val webView = findViewById<android.view.View>(R.id.webViewYoutubeMusic)
+                    if (dock != null && dock.hasFocus() && webView != null) {
+                        if (webView.requestFocus()) return true
+                    } else if (dock != null && dock.requestFocus(android.view.View.FOCUS_DOWN)) {
+                        return true
+                    }
+                }
             }
         }
         return super.dispatchKeyEvent(event)

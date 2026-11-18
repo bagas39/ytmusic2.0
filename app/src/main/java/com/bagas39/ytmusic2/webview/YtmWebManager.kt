@@ -1,6 +1,7 @@
 package com.bagas39.ytmusic2.webview
 
 import android.annotation.SuppressLint
+import android.os.Looper
 import android.util.Log
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
@@ -265,7 +266,11 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
     fun getCurrentVideoId(): String? = currentDomVideoId?.takeIf { it.isNotBlank() } ?: extractVideoId(webView.url)
 
     fun executeJs(script: String) {
-        webView.evaluateJavascript(script, null)
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            webView.evaluateJavascript(script, null)
+        } else {
+            webView.post { webView.evaluateJavascript(script, null) }
+        }
     }
 
     fun clickPrevious() {
@@ -393,8 +398,12 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
     }
 
     fun captureCurrentSong() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            webView.post { captureCurrentSong() }
+            return
+        }
         val url = webView.url ?: return
-        val videoId = extractVideoId(url)
+        extractVideoId(url)
         executeJs(
             """
             (function() {

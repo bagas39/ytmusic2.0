@@ -186,35 +186,44 @@ class AppCoordinator(private val activity: AppCompatActivity) {
                 streamOptimizer.injectOptimizerScript()
             }
             onTitleDetected = { title ->
-                currentOnlineTitle = title
-                streamOptimizer.updateTrackTitle(title)
+                activity.runOnUiThread {
+                    currentOnlineTitle = title
+                    if (!offlinePlayer.isOfflineActive) {
+                        syncLyricsMetaToView()
+                    }
+                    streamOptimizer.updateTrackTitle(title)
+                }
             }
             onSongStateChanged = { metadata ->
-                val trackChanged = currentOnlineTitle != metadata.title || currentOnlineArtist != metadata.artist
-                currentOnlineTitle = metadata.title
-                currentOnlineArtist = metadata.artist
-                currentOnlineIsPlaying = metadata.isPlaying
-                currentOnlinePositionMs = metadata.positionMs
-                currentOnlineDurationMs = metadata.durationMs
-                if (!offlinePlayer.isOfflineActive) {
-                    activity.runOnUiThread {
+                activity.runOnUiThread {
+                    val trackChanged = currentOnlineTitle != metadata.title || currentOnlineArtist != metadata.artist
+                    currentOnlineTitle = metadata.title
+                    currentOnlineArtist = metadata.artist
+                    currentOnlineIsPlaying = metadata.isPlaying
+                    currentOnlinePositionMs = metadata.positionMs
+                    currentOnlineDurationMs = metadata.durationMs
+                    streamOptimizer.updateTrackTitle(metadata.title)
+
+                    if (!offlinePlayer.isOfflineActive) {
                         syncLyricsMetaToView()
                         if (trackChanged && viewController.isLyricsSheetVisible) {
                             loadLyricsForCurrentTrack(forceRefresh = false)
                         }
-                    }
-                    onPlaybackProgress?.invoke(metadata.positionMs, metadata.durationMs)
-                }
-                streamOptimizer.updateTrackTitle(metadata.title)
-                // Jika sedang mode offline dan user memutar lagu di webview YTM:
-                if (offlinePlayer.isOfflineActive) {
-                    if (metadata.isPlaying) {
+                        onPlaybackProgress?.invoke(metadata.positionMs, metadata.durationMs)
+                        updatePlaybackNotification(
+                            title = metadata.title,
+                            artist = metadata.artist,
+                            isPlaying = metadata.isPlaying,
+                            durationMs = metadata.durationMs,
+                            positionMs = metadata.positionMs,
+                            artworkSource = metadata.artworkUrl,
+                            forceUpdate = true
+                        )
+                    } else if (metadata.isPlaying) {
                         offlinePlayer.stop()
-                        activity.runOnUiThread {
-                            syncLyricsMetaToView()
-                            if (viewController.isLyricsSheetVisible) {
-                                loadLyricsForCurrentTrack(forceRefresh = false)
-                            }
+                        syncLyricsMetaToView()
+                        if (viewController.isLyricsSheetVisible) {
+                            loadLyricsForCurrentTrack(forceRefresh = false)
                         }
                         updatePlaybackNotification(
                             title = metadata.title,
@@ -226,26 +235,16 @@ class AppCoordinator(private val activity: AppCompatActivity) {
                             forceUpdate = true
                         )
                     }
-                } else {
-                    updatePlaybackNotification(
-                        title = metadata.title,
-                        artist = metadata.artist,
-                        isPlaying = metadata.isPlaying,
-                        durationMs = metadata.durationMs,
-                        positionMs = metadata.positionMs,
-                        artworkSource = metadata.artworkUrl,
-                        forceUpdate = true
-                    )
                 }
             }
             onPlaybackProgressChanged = { posMs, durMs ->
-                currentOnlinePositionMs = posMs
-                currentOnlineDurationMs = durMs
-                if (!offlinePlayer.isOfflineActive) {
-                    activity.runOnUiThread {
+                activity.runOnUiThread {
+                    currentOnlinePositionMs = posMs
+                    currentOnlineDurationMs = durMs
+                    if (!offlinePlayer.isOfflineActive) {
                         viewController.updateLyricsPlaybackProgress(posMs, durMs)
+                        onPlaybackProgress?.invoke(posMs, durMs)
                     }
-                    onPlaybackProgress?.invoke(posMs, durMs)
                 }
             }
         }
@@ -729,6 +728,17 @@ class AppCoordinator(private val activity: AppCompatActivity) {
                     if (offlinePlayer.currentSong?.absolutePath == file.absolutePath) {
                         viewController.setOfflineHasLocalLyrics(false)
                         lastLoadedLyricsKey = ""
+                        val (cleanTitle, cleanArtist) = LyricsRepository.sanitizeTitleAndArtist(
+                            file.nameWithoutExtension,
+                            ""
+                        )
+                        viewController.setLyricsUiState(
+                            LyricsUiState.NotFound(
+                                title = cleanTitle.ifBlank { file.nameWithoutExtension },
+                                artist = cleanArtist,
+                                reason = "File lirik lokal telah dihapus. Ketuk Coba Lagi untuk mencari ulang."
+                            )
+                        )
                     }
                     Toast.makeText(activity, "File lirik (.lrc) dihapus", Toast.LENGTH_SHORT).show()
                 } else {
