@@ -1,5 +1,6 @@
 package com.bagas39.ytmusic2.lyrics
 
+import android.media.MediaMetadataRetriever
 import android.os.Handler
 import android.os.Looper
 import android.util.Base64
@@ -31,56 +32,28 @@ object LyricsRepository {
         "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
     private const val CONNECT_TIMEOUT_MS = 8000
     private const val READ_TIMEOUT_MS = 8000
+    private const val DURATION_REVALIDATE_TOLERANCE_MS = 2500L
 
-    private val mainHandler = Handler(Looper.getMainLooper())
+    private val mainHandler: Handler by lazy { Handler(Looper.getMainLooper()) }
     private val memoryCache = object : LruCache<String, LyricsResult>(20) {}
 
-    private val NOISE_PARENS_REGEX = Regex(
-        """[({\[]\s*(?:official\s*(?:music\s*)?video|official\s*audio|lyric\s*video|lyrics?|visualizer|music\s*video|mv|hd|hq|4k|remastered(?:\s*\d{4})?|audio|video|explicit|live(?:\s+at[^)\]}]+)?)\s*[)}\]]""",
-        RegexOption.IGNORE_CASE
-    )
-    private val FEAT_REGEX = Regex("""\s+(?:ft\.?|feat\.?|featuring)\s+.*$""", RegexOption.IGNORE_CASE)
-    private val ARTIST_NOISE_REGEX = Regex("""\s*(?:-|•)?\s*(?:Topic|VEVO|Official)\s*$""", RegexOption.IGNORE_CASE)
-    private val PUNCT_NORM_REGEX = Regex("""[\\/:*?"<>|\u29f8\uff0f\uff1a\uff0a\uff1f\uff02\uff1c\uff1e\uff5c_\-]+""")
-    private val MULTISPACE_REGEX = Regex("""\s+""")
     private val INVALID_FILENAME_REGEX = Regex("""[\\/:*?"<>|\u0000-\u001f]""")
     private val OVH_HEADER_REGEX = Regex("""^Paroles de la chanson [^\r\n]+[\r\n]+""", RegexOption.IGNORE_CASE)
 
+    internal data class ScoredLyricsCandidate(
+        val score: Int,
+        val result: LyricsResult
+    )
+
     /**
      * Membersihkan judul dan nama artis dari embel-embel umum YouTube agar pencarian
-     * lirik di LRCLIB lebih akurat. Jika artis kosong dan judul memakai pola `Artis - Judul`,
-     * keduanya dipisahkan otomatis.
+     * lirik di LRCLIB lebih akurat.
      */
-    fun sanitizeTitleAndArtist(rawTitle: String, rawArtist: String): Pair<String, String> {
-        var title = rawTitle.trim()
-        var artist = rawArtist
-            .replace(ARTIST_NOISE_REGEX, "")
-            .trim()
+    fun sanitizeTitleAndArtist(rawTitle: String, rawArtist: String): Pair<String, String> =
+        LyricsMatcher.sanitizeTitleAndArtist(rawTitle, rawArtist)
 
-        if (artist.equals("YouTube Music", ignoreCase = true) ||
-            artist.equals("Offline", ignoreCase = true) ||
-            artist.startsWith("Offline (", ignoreCase = true) ||
-            artist.equals("Lagu Offline", ignoreCase = true)
-        ) {
-            artist = ""
-        }
-
-        // Hapus noise dalam tanda kurung dan kata feat./ft. pada judul
-        title = NOISE_PARENS_REGEX.replace(title, " ")
-        title = FEAT_REGEX.replace(title, "")
-        title = MULTISPACE_REGEX.replace(title, " ").trim()
-
-        // Pisahkan "Artist - Title" jika artis belum diketahui
-        if (artist.isBlank() && title.contains(" - ")) {
-            val parts = title.split(" - ", limit = 2)
-            if (parts.size == 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) {
-                artist = ARTIST_NOISE_REGEX.replace(parts[0], "").trim()
-                title = parts[1].trim()
-            }
-        }
-
-        return title to artist
-    }
+    internal fun extractTitleSearchVariants(cleanTitle: String): List<String> =
+        LyricsMatcher.extractTitleSearchVariants(cleanTitle)
 
     /**
      * Mencari file `.lrc` lokal di `YTMusic2/Lyrics/` (atau lokasi legacy) yang cocok
@@ -145,9 +118,39 @@ object LyricsRepository {
         }
 
         val (cleanTitle, cleanArtist) = sanitizeTitleAndArtist(audioFile.nameWithoutExtension, "")
-        memoryCache.remove(buildCacheKey(cleanTitle, cleanArtist))
+        val prefix = "${normalizeForMatch(cleanTitle)}|${normalizeForMatch(cleanArtist)}|"
+        memoryCache.snapshot().keys
+            .filter { it.startsWith(prefix) }
+            .forEach { memoryCache.remove(it) }
         return deletedAny
     }
+
+    /**
+     * Mengukur durasi file audio lokal dalam milidetik via [MediaMetadataRetriever] secara aman.
+     */
+    fun extractAudioDurationMs(audioFile: File?): Long {
+        if (audioFile == null || !audioFile.isFile || !audioFile.canRead()) return 0L
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(audioFile.absolutePath)
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull()
+                ?.takeIf { it > 0L }
+                ?: 0L
+        } catch (_: Throwable) {
+            0L
+        } finally {
+            try {
+                retriever.release()
+            } catch (_: Throwable) {}
+        }
+    }
+
+    internal fun extractDurationTagMs(rawLrc: String): Long =
+        LyricsMatcher.extractDurationTagMs(rawLrc)
+
+    internal fun formatLrcWithDurationTag(rawLrc: String, durationMs: Long): String =
+        LyricsMatcher.formatLrcWithDurationTag(rawLrc, durationMs)
 
     /**
      * Menyimpan konten LRC dalam encoding UTF-8 secara aman ke [targetFile].
@@ -168,8 +171,8 @@ object LyricsRepository {
     /**
      * Mengambil lirik secara asynchronous: memprioritaskan file `.lrc` lokal di `YTMusic2/Lyrics/`,
      * lalu memory cache, dan terakhir rantai API (LRCLIB -> NetEase -> KuGou -> Lyrics.ovh).
-     * Jika [ignoreLocalCache] bernilai `true`, pencarian melewati cache lokal & memori untuk
-     * mengambil ulang lirik dari jaringan (misal saat pencarian manual kata kunci baru).
+     * Jika file `.lrc` lokal belum memiliki tag durasi yang cocok dengan audio offline aktual,
+     * penyedia daring akan dicek ulang agar versi sinkronisasi yang sesuai durasi diprioritaskan.
      * Hasil dikirim kembali ke main thread melalui [onResult].
      */
     fun getLyricsAsync(
@@ -187,30 +190,56 @@ object LyricsRepository {
 
         val effectiveTitle = title.ifBlank { offlineFile?.nameWithoutExtension.orEmpty() }
         val (cleanTitle, cleanArtist) = sanitizeTitleAndArtist(effectiveTitle, artist)
-        val cacheKey = buildCacheKey(cleanTitle, cleanArtist)
 
         thread(name = "ytm-lyrics-fetch") {
             val result = try {
+                val resolvedDurationMs = if (durationMs > 0L) durationMs else extractAudioDurationMs(offlineFile)
+                val cacheKey = buildCacheKey(cleanTitle, cleanArtist, resolvedDurationMs)
+
                 // 1. Cek file .lrc lokal terlebih dahulu kecuali dipaksa cari ulang
                 val localFile = if (!ignoreLocalCache) findLocalLrcFile(effectiveTitle, offlineFile) else null
                 if (localFile != null) {
                     val raw = localFile.readText(Charsets.UTF_8)
-                    parseLrcToResult(
+                    val localParsed = parseLrcToResult(
                         raw = raw,
                         title = cleanTitle.ifBlank { effectiveTitle },
                         artist = cleanArtist
-                    )?.also { memoryCache.put(cacheKey, it) }
+                    )
+                    val stampedDurMs = extractDurationTagMs(raw)
+                    val needsDurationRevalidation = resolvedDurationMs > 0L &&
+                        (stampedDurMs <= 0L || abs(stampedDurMs - resolvedDurationMs) > DURATION_REVALIDATE_TOLERANCE_MS)
+
+                    val finalLocal = if (needsDurationRevalidation) {
+                        val refreshed = fetchLyricsWithFallbacks(cleanTitle, cleanArtist, resolvedDurationMs)
+                        when {
+                            refreshed != null && refreshed.isSynced -> {
+                                val targetSave = if (offlineFile != null) FileUtils.getCompanionLrcFile(offlineFile) else localFile
+                                saveLrcToFile(formatLrcWithDurationTag(refreshed.rawLrc, resolvedDurationMs), targetSave)
+                                refreshed
+                            }
+                            refreshed != null && localParsed?.isSynced == true -> {
+                                // Server tidak memberi lirik sinkron yang lebih cocok; tandai file lokal sebagai sudah tervalidasi
+                                val targetSave = if (offlineFile != null) FileUtils.getCompanionLrcFile(offlineFile) else localFile
+                                saveLrcToFile(formatLrcWithDurationTag(raw, resolvedDurationMs), targetSave)
+                                localParsed
+                            }
+                            else -> localParsed
+                        }
+                    } else {
+                        localParsed
+                    }
+                    finalLocal?.also { memoryCache.put(cacheKey, it) }
                 } else {
                     // 2. Cek in-memory LRU cache (bila tidak force-refresh), atau 3. Ambil dari penyedia lirik
                     val cached = if (!ignoreLocalCache) memoryCache.get(cacheKey) else null
                     val resolved = cached
-                        ?: fetchLyricsWithFallbacks(cleanTitle, cleanArtist, durationMs)?.also { fetched ->
+                        ?: fetchLyricsWithFallbacks(cleanTitle, cleanArtist, resolvedDurationMs)?.also { fetched ->
                             memoryCache.put(cacheKey, fetched)
                         }
                     // Jika lagu offline ada dan ditemukan lirik sinkron, simpan otomatis ke YTMusic2/Lyrics/
                     if (offlineFile != null && resolved != null && resolved.isSynced && resolved.rawLrc.isNotBlank()) {
                         val companion = FileUtils.getCompanionLrcFile(offlineFile)
-                        saveLrcToFile(resolved.rawLrc, companion)
+                        saveLrcToFile(formatLrcWithDurationTag(resolved.rawLrc, resolvedDurationMs), companion)
                     }
                     resolved
                 }
@@ -230,21 +259,23 @@ object LyricsRepository {
         title: String,
         artist: String = "",
         targetDir: File = FileUtils.getLyricsDir(),
-        mp3File: File? = null
+        mp3File: File? = null,
+        durationMs: Long = 0L
     ): File? {
         val effectiveTitle = title.ifBlank { mp3File?.nameWithoutExtension.orEmpty() }
         if (effectiveTitle.isBlank()) return null
 
+        val resolvedDurationMs = if (durationMs > 0L) durationMs else extractAudioDurationMs(mp3File)
         val (cleanTitle, cleanArtist) = sanitizeTitleAndArtist(effectiveTitle, artist)
-        val cacheKey = buildCacheKey(cleanTitle, cleanArtist)
+        val cacheKey = buildCacheKey(cleanTitle, cleanArtist, resolvedDurationMs)
 
         val result = memoryCache.get(cacheKey)
-            ?: fetchLyricsWithFallbacks(cleanTitle, cleanArtist, durationMs = 0L)?.also {
+            ?: fetchLyricsWithFallbacks(cleanTitle, cleanArtist, resolvedDurationMs)?.also {
                 memoryCache.put(cacheKey, it)
             }
             ?: return null
 
-        val contentToSave = result.rawLrc.trim()
+        val contentToSave = formatLrcWithDurationTag(result.rawLrc, resolvedDurationMs)
         if (contentToSave.isEmpty()) return null
 
         val targetFile = if (mp3File != null) {
@@ -259,29 +290,53 @@ object LyricsRepository {
 
     /**
      * Mencoba penyedia lirik secara berurutan (LRCLIB -> NetEase -> KuGou -> Lyrics.ovh).
-     * Mengutamakan lirik sinkron (`isSynced == true`) dan menyimpan hasil plain text paling awal
-     * sebagai cadangan bila tidak ada penyedia yang memiliki timestamp LRC.
+     * Mengutamakan lirik sinkron (`isSynced == true`) dan memecah judul ganda jika judul utuh
+     * tidak menghasilkan lirik sinkron di penyedia terkait.
      */
     private fun fetchLyricsWithFallbacks(
         cleanTitle: String,
         cleanArtist: String,
         durationMs: Long
     ): LyricsResult? {
+        val titleVariants = extractTitleSearchVariants(cleanTitle)
+        if (titleVariants.isEmpty()) return null
+
         var plainFallback: LyricsResult? = null
-        val syncedCapableFetchers = listOf(
+        val syncedCapableFetchers: List<(String, String, Long) -> ScoredLyricsCandidate?> = listOf(
             ::fetchFromLrclib,
             ::fetchFromNetease,
             ::fetchFromKugou
         )
         for (fetcher in syncedCapableFetchers) {
-            val result = fetcher(cleanTitle, cleanArtist, durationMs) ?: continue
-            if (result.isSynced) return result
-            if (plainFallback == null) plainFallback = result
+            val primary = fetcher(titleVariants.first(), cleanArtist, durationMs)
+            if (primary != null) {
+                if (primary.result.isSynced) return primary.result
+                if (plainFallback == null) plainFallback = primary.result
+            }
+            if (titleVariants.size > 1) {
+                var bestSegment: ScoredLyricsCandidate? = null
+                for (segment in titleVariants.drop(1)) {
+                    val candidate = fetcher(segment, cleanArtist, durationMs) ?: continue
+                    if (candidate.result.isSynced) {
+                        if (bestSegment == null || candidate.score > bestSegment.score) {
+                            bestSegment = candidate
+                        }
+                    } else if (plainFallback == null) {
+                        plainFallback = candidate.result
+                    }
+                }
+                if (bestSegment != null) return bestSegment.result
+            }
         }
-        return plainFallback ?: fetchFromLyricsOvh(cleanTitle, cleanArtist)
+        if (plainFallback != null) return plainFallback
+        for (variant in titleVariants) {
+            val ovh = fetchFromLyricsOvh(variant, cleanArtist)
+            if (ovh != null) return ovh
+        }
+        return null
     }
 
-    private fun fetchFromLrclib(cleanTitle: String, cleanArtist: String, durationMs: Long): LyricsResult? {
+    private fun fetchFromLrclib(cleanTitle: String, cleanArtist: String, durationMs: Long): ScoredLyricsCandidate? {
         val query = listOf(cleanTitle, cleanArtist)
             .filter { it.isNotBlank() }
             .joinToString(" ")
@@ -315,7 +370,7 @@ object LyricsRepository {
         }
     }
 
-    private fun fetchFromNetease(cleanTitle: String, cleanArtist: String, durationMs: Long): LyricsResult? {
+    private fun fetchFromNetease(cleanTitle: String, cleanArtist: String, durationMs: Long): ScoredLyricsCandidate? {
         val primaryQuery = listOf(cleanTitle, cleanArtist)
             .filter { it.isNotBlank() }
             .joinToString(" ")
@@ -337,7 +392,7 @@ object LyricsRepository {
         }
         if (songs == null || songs.length() == 0) return null
 
-        val bestSong = pickBestJsonCandidate(songs, cleanTitle, cleanArtist, durationMs) { song ->
+        val bestMatch = pickBestJsonCandidate(songs, cleanTitle, cleanArtist, durationMs) { song ->
             val songId = song.optLong("id", -1L)
             if (songId <= 0L) return@pickBestJsonCandidate null
             val trackName = song.optString("name", "").trim()
@@ -349,6 +404,7 @@ object LyricsRepository {
             Triple(trackName, artistName, song.optDouble("duration", -1.0) / 1000.0)
         } ?: return null
 
+        val (bestSong, metaScore) = bestMatch
         val bestSongId = bestSong.optLong("id", -1L)
         val bestTrackName = bestSong.optString("name", "").trim().ifBlank { cleanTitle }
         val bestArtistName = bestSong.optJSONArray("artists")
@@ -369,7 +425,8 @@ object LyricsRepository {
             val karaokeLrc = json.optJSONObject("klyric")?.optString("lyric", "")?.trim().orEmpty()
             val rawLrc = standardLrc.ifEmpty { karaokeLrc }
             if (rawLrc.isEmpty()) return null
-            parseLrcToResult(rawLrc, bestTrackName, bestArtistName)
+            val parsed = parseLrcToResult(rawLrc, bestTrackName, bestArtistName) ?: return null
+            ScoredLyricsCandidate(score = (if (parsed.isSynced) 100 else 0) + metaScore, result = parsed)
         } catch (_: Exception) {
             null
         }
@@ -385,7 +442,7 @@ object LyricsRepository {
         }
     }
 
-    private fun fetchFromKugou(cleanTitle: String, cleanArtist: String, durationMs: Long): LyricsResult? {
+    private fun fetchFromKugou(cleanTitle: String, cleanArtist: String, durationMs: Long): ScoredLyricsCandidate? {
         val query = listOf(cleanArtist, cleanTitle)
             .filter { it.isNotBlank() }
             .joinToString(" ")
@@ -400,7 +457,7 @@ object LyricsRepository {
         }
         if (candidates == null || candidates.length() == 0) return null
 
-        val bestCandidate = pickBestJsonCandidate(candidates, cleanTitle, cleanArtist, durationMs) { item ->
+        val bestMatch = pickBestJsonCandidate(candidates, cleanTitle, cleanArtist, durationMs) { item ->
             val id = item.optString("id", "").trim()
             val accessKey = item.optString("accesskey", "").trim()
             if (id.isEmpty() || accessKey.isEmpty()) return@pickBestJsonCandidate null
@@ -409,6 +466,7 @@ object LyricsRepository {
             Triple(trackName, artistName, item.optDouble("duration", -1.0) / 1000.0)
         } ?: return null
 
+        val (bestCandidate, metaScore) = bestMatch
         val bestId = bestCandidate.optString("id", "").trim()
         val bestAccessKey = bestCandidate.optString("accesskey", "").trim()
         val bestTrackName = bestCandidate.optString("song", "").trim().ifBlank { cleanTitle }
@@ -426,7 +484,8 @@ object LyricsRepository {
             val decodedBytes = Base64.decode(base64Content, Base64.DEFAULT)
             val rawLrc = String(decodedBytes, Charsets.UTF_8).trim()
             if (rawLrc.isEmpty()) return null
-            parseLrcToResult(rawLrc, bestTrackName, bestArtistName)
+            val parsed = parseLrcToResult(rawLrc, bestTrackName, bestArtistName) ?: return null
+            ScoredLyricsCandidate(score = (if (parsed.isSynced) 100 else 0) + metaScore, result = parsed)
         } catch (_: Exception) {
             null
         }
@@ -496,13 +555,12 @@ object LyricsRepository {
         targetTitle: String,
         targetArtist: String,
         durationMs: Long
-    ): LyricsResult? {
+    ): ScoredLyricsCandidate? {
         val normTargetTitle = normalizeForMatch(targetTitle)
         val normTargetArtist = normalizeForMatch(targetArtist)
         val targetDurationSec = if (durationMs > 0L) durationMs / 1000.0 else -1.0
 
-        var bestResult: LyricsResult? = null
-        var bestScore = Int.MIN_VALUE
+        var bestCandidate: ScoredLyricsCandidate? = null
 
         for (i in 0 until array.length()) {
             val item = array.optJSONObject(i) ?: continue
@@ -515,7 +573,7 @@ object LyricsRepository {
             val durationSec = item.optDouble("duration", -1.0)
             val isSynced = synced.isNotEmpty()
 
-            val score = (if (isSynced) 100 else 0) + scoreCandidateMetadata(
+            val baseScore = (if (isSynced) 100 else 0) + scoreCandidateMetadata(
                 normTrack = normalizeForMatch(trackName),
                 normArtist = normalizeForMatch(artistName),
                 candidateDurationSec = durationSec,
@@ -524,22 +582,27 @@ object LyricsRepository {
                 targetDurationSec = targetDurationSec
             )
 
-            if (score > bestScore) {
+            if (bestCandidate == null || baseScore >= bestCandidate.score) {
                 val lines = if (isSynced) LrcParser.parse(synced) else LrcParser.parsePlain(plain)
                 if (lines.isNotEmpty()) {
-                    bestScore = score
-                    bestResult = LyricsResult(
-                        title = trackName.ifBlank { targetTitle },
-                        artist = artistName.ifBlank { targetArtist },
-                        isSynced = isSynced,
-                        lines = lines,
-                        rawLrc = if (isSynced) synced else plain
-                    )
+                    val finalScore = baseScore + if (isSynced) LyricsMatcher.scoreSyncedLineCadence(lines) else 0
+                    if (bestCandidate == null || finalScore > bestCandidate.score) {
+                        bestCandidate = ScoredLyricsCandidate(
+                            score = finalScore,
+                            result = LyricsResult(
+                                title = trackName.ifBlank { targetTitle },
+                                artist = artistName.ifBlank { targetArtist },
+                                isSynced = isSynced,
+                                lines = lines,
+                                rawLrc = if (isSynced) synced else plain
+                            )
+                        )
+                    }
                 }
             }
         }
 
-        return bestResult
+        return bestCandidate
     }
 
     private fun pickBestJsonCandidate(
@@ -548,7 +611,7 @@ object LyricsRepository {
         cleanArtist: String,
         durationMs: Long,
         extractMeta: (JSONObject) -> Triple<String, String, Double>?
-    ): JSONObject? {
+    ): Pair<JSONObject, Int>? {
         val normTargetTitle = normalizeForMatch(cleanTitle)
         val normTargetArtist = normalizeForMatch(cleanArtist)
         val targetDurationSec = if (durationMs > 0L) durationMs / 1000.0 else -1.0
@@ -576,47 +639,27 @@ object LyricsRepository {
             }
         }
 
-        return bestItem
+        return bestItem?.let { it to bestScore }
     }
 
-    private fun titlesMatch(normTrack: String, normTargetTitle: String): Boolean {
-        if (normTrack.isEmpty() || normTargetTitle.isEmpty()) return false
-        return normTrack == normTargetTitle ||
-            normTrack.contains(normTargetTitle) ||
-            normTargetTitle.contains(normTrack)
-    }
+    private fun titlesMatch(normTrack: String, normTargetTitle: String): Boolean =
+        LyricsMatcher.titlesMatch(normTrack, normTargetTitle)
 
-    private fun scoreCandidateMetadata(
+    internal fun scoreCandidateMetadata(
         normTrack: String,
         normArtist: String,
         candidateDurationSec: Double,
         normTargetTitle: String,
         normTargetArtist: String,
         targetDurationSec: Double
-    ): Int {
-        var score = 0
-        if (normTargetTitle.isNotEmpty() && normTrack.isNotEmpty()) {
-            when {
-                normTrack == normTargetTitle -> score += 40
-                normTrack.contains(normTargetTitle) || normTargetTitle.contains(normTrack) -> score += 20
-            }
-        }
-        if (normTargetArtist.isNotEmpty() && normArtist.isNotEmpty()) {
-            when {
-                normArtist == normTargetArtist -> score += 35
-                normArtist.contains(normTargetArtist) || normTargetArtist.contains(normArtist) -> score += 20
-            }
-        }
-        if (targetDurationSec > 0 && candidateDurationSec > 0) {
-            val diff = abs(candidateDurationSec - targetDurationSec)
-            when {
-                diff <= 2.0 -> score += 30
-                diff <= 5.0 -> score += 15
-                diff > 20.0 -> score -= 20
-            }
-        }
-        return score
-    }
+    ): Int = LyricsMatcher.scoreCandidateMetadata(
+        normTrack = normTrack,
+        normArtist = normArtist,
+        candidateDurationSec = candidateDurationSec,
+        normTargetTitle = normTargetTitle,
+        normTargetArtist = normTargetArtist,
+        targetDurationSec = targetDurationSec
+    )
 
     private fun parseLrcToResult(raw: String, title: String, artist: String): LyricsResult? {
         val syncedLines = LrcParser.parse(raw)
@@ -642,14 +685,9 @@ object LyricsRepository {
         return null
     }
 
-    private fun buildCacheKey(cleanTitle: String, cleanArtist: String): String {
-        return "${normalizeForMatch(cleanTitle)}|${normalizeForMatch(cleanArtist)}"
-    }
+    internal fun buildCacheKey(cleanTitle: String, cleanArtist: String, durationMs: Long = 0L): String =
+        LyricsMatcher.buildCacheKey(cleanTitle, cleanArtist, durationMs)
 
-    private fun normalizeForMatch(raw: String): String {
-        return raw.lowercase()
-            .replace(PUNCT_NORM_REGEX, " ")
-            .replace(MULTISPACE_REGEX, " ")
-            .trim()
-    }
+    internal fun normalizeForMatch(raw: String): String =
+        LyricsMatcher.normalizeForMatch(raw)
 }

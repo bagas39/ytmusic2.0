@@ -52,6 +52,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
     private var sleepTimer: CountDownTimer? = null
     private var sleepTimerRemainingMs: Long = 0L
     private var lastLoadedLyricsKey: String = ""
+    private var lastLoadedLyricsDurationSec: Long = 0L
     private var lyricsRequestSeq: Long = 0L
 
     /**
@@ -206,7 +207,9 @@ class AppCoordinator(private val activity: AppCompatActivity) {
 
                     if (!offlinePlayer.isOfflineActive) {
                         syncLyricsMetaToView()
-                        if (trackChanged && viewController.isLyricsSheetVisible) {
+                        val shouldRefreshLyrics = viewController.isLyricsSheetVisible &&
+                            (trackChanged || (metadata.durationMs > 0L && lastLoadedLyricsDurationSec == 0L))
+                        if (shouldRefreshLyrics) {
                             loadLyricsForCurrentTrack(forceRefresh = false)
                         }
                         onPlaybackProgress?.invoke(metadata.positionMs, metadata.durationMs)
@@ -244,6 +247,11 @@ class AppCoordinator(private val activity: AppCompatActivity) {
                     if (!offlinePlayer.isOfflineActive) {
                         viewController.updateLyricsPlaybackProgress(posMs, durMs)
                         onPlaybackProgress?.invoke(posMs, durMs)
+                        if (durMs > 0L && viewController.isLyricsSheetVisible &&
+                            currentOnlineTitle.isNotBlank() && lastLoadedLyricsDurationSec == 0L
+                        ) {
+                            loadLyricsForCurrentTrack(forceRefresh = false)
+                        }
                     }
                 }
             }
@@ -300,6 +308,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
                 syncLyricsMetaToView()
                 if (viewController.isLyricsSheetVisible) {
                     lastLoadedLyricsKey = ""
+                    lastLoadedLyricsDurationSec = 0L
                     loadLyricsForCurrentTrack(forceRefresh = false)
                 }
                 val title = currentOnlineTitle.ifBlank { "YouTube Music" }
@@ -494,15 +503,19 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         val rawTitle = if (isOffline) offlineSong!!.nameWithoutExtension else currentOnlineTitle
         val rawArtist = if (isOffline) "" else currentOnlineArtist
         val durationMs = if (isOffline) offlinePlayer.currentDurationMs else currentOnlineDurationMs
+        val durationSec = if (durationMs > 0L) durationMs / 1000L else 0L
 
         if (rawTitle.isBlank()) {
             lastLoadedLyricsKey = ""
+            lastLoadedLyricsDurationSec = 0L
             viewController.setLyricsUiState(LyricsUiState.Idle)
             return
         }
 
         val trackKey = "$isOffline|${offlineSong?.absolutePath.orEmpty()}|$rawTitle|$rawArtist"
-        if (!forceRefresh && trackKey == lastLoadedLyricsKey) {
+        val isSameTrack = trackKey == lastLoadedLyricsKey
+        val needsDurationUpgrade = !isOffline && isSameTrack && lastLoadedLyricsDurationSec == 0L && durationSec > 0L
+        if (!forceRefresh && isSameTrack && !needsDurationUpgrade) {
             return
         }
 
@@ -510,19 +523,23 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         val displayTitle = cleanTitle.ifBlank { rawTitle }
         val displayArtist = cleanArtist.ifBlank { rawArtist }
         val requestId = ++lyricsRequestSeq
+        lastLoadedLyricsDurationSec = durationSec
 
-        viewController.setLyricsUiState(LyricsUiState.Loading(displayTitle, displayArtist))
+        if (!needsDurationUpgrade) {
+            viewController.setLyricsUiState(LyricsUiState.Loading(displayTitle, displayArtist))
+        }
 
         LyricsRepository.getLyricsAsync(
             title = rawTitle,
             artist = rawArtist,
             durationMs = durationMs,
             offlineFile = offlineSong,
-            ignoreLocalCache = forceRefresh
+            ignoreLocalCache = forceRefresh || needsDurationUpgrade
         ) { result ->
             if (requestId != lyricsRequestSeq) return@getLyricsAsync
             if (result != null && result.lines.isNotEmpty()) {
                 lastLoadedLyricsKey = trackKey
+                lastLoadedLyricsDurationSec = durationSec
                 val isSaved = offlineSong != null && LyricsRepository.hasLocalLyrics(offlineSong)
                 if (offlineSong != null) {
                     viewController.setOfflineHasLocalLyrics(isSaved)
@@ -534,8 +551,9 @@ class AppCoordinator(private val activity: AppCompatActivity) {
                         isSavedLocally = isSaved
                     )
                 )
-            } else {
+            } else if (!needsDurationUpgrade) {
                 lastLoadedLyricsKey = ""
+                lastLoadedLyricsDurationSec = 0L
                 viewController.setLyricsUiState(
                     LyricsUiState.NotFound(
                         title = displayTitle,
@@ -554,6 +572,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
 
         val offlineSong = if (offlinePlayer.isOfflineActive) offlinePlayer.currentSong else null
         val isOffline = offlineSong != null
+        val durationMs = currentDurationMs
         val requestId = ++lyricsRequestSeq
 
         viewController.setLyricsUiState(LyricsUiState.Loading(trimmedTitle, trimmedArtist))
@@ -561,7 +580,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         LyricsRepository.getLyricsAsync(
             title = trimmedTitle,
             artist = trimmedArtist,
-            durationMs = currentDurationMs,
+            durationMs = durationMs,
             offlineFile = offlineSong,
             ignoreLocalCache = true
         ) { result ->
@@ -570,6 +589,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
                 val trackTitle = if (isOffline) offlineSong!!.nameWithoutExtension else currentOnlineTitle
                 val trackArtist = if (isOffline) "" else currentOnlineArtist
                 lastLoadedLyricsKey = "$isOffline|${offlineSong?.absolutePath.orEmpty()}|$trackTitle|$trackArtist"
+                lastLoadedLyricsDurationSec = if (durationMs > 0L) durationMs / 1000L else 0L
                 val isSaved = offlineSong != null && LyricsRepository.hasLocalLyrics(offlineSong)
                 if (offlineSong != null) {
                     viewController.setOfflineHasLocalLyrics(isSaved)
@@ -698,16 +718,20 @@ class AppCoordinator(private val activity: AppCompatActivity) {
                 Toast.makeText(activity, "Mencari lirik untuk ${file.nameWithoutExtension}...", Toast.LENGTH_SHORT).show()
                 LyricsRepository.getLyricsAsync(
                     title = file.nameWithoutExtension,
-                    offlineFile = file
+                    offlineFile = file,
+                    ignoreLocalCache = true
                 ) { result ->
                     if (result != null && result.rawLrc.isNotBlank()) {
                         val lrcFile = FileUtils.getCompanionLrcFile(file)
                         if (!lrcFile.exists()) {
-                            LyricsRepository.saveLrcToFile(result.rawLrc, lrcFile)
+                            val fileDurationMs = LyricsRepository.extractAudioDurationMs(file)
+                            val stampedContent = LyricsRepository.formatLrcWithDurationTag(result.rawLrc, fileDurationMs)
+                            LyricsRepository.saveLrcToFile(stampedContent, lrcFile)
                         }
                         if (offlinePlayer.currentSong?.absolutePath == file.absolutePath) {
                             viewController.setOfflineHasLocalLyrics(true)
                             lastLoadedLyricsKey = ""
+                            lastLoadedLyricsDurationSec = 0L
                             if (viewController.isLyricsSheetVisible) {
                                 loadLyricsForCurrentTrack(forceRefresh = false)
                             }
@@ -728,6 +752,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
                     if (offlinePlayer.currentSong?.absolutePath == file.absolutePath) {
                         viewController.setOfflineHasLocalLyrics(false)
                         lastLoadedLyricsKey = ""
+                        lastLoadedLyricsDurationSec = 0L
                         val (cleanTitle, cleanArtist) = LyricsRepository.sanitizeTitleAndArtist(
                             file.nameWithoutExtension,
                             ""
