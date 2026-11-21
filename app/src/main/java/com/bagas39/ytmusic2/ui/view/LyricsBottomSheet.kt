@@ -86,6 +86,7 @@ import androidx.compose.ui.unit.sp
 import com.bagas39.ytmusic2.lyrics.LrcParser
 import com.bagas39.ytmusic2.lyrics.LyricLine
 import com.bagas39.ytmusic2.lyrics.LyricsResult
+import com.bagas39.ytmusic2.ui.theme.YtmPalette
 import com.bagas39.ytmusic2.util.FormatUtils
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -116,25 +117,21 @@ sealed interface LyricsUiState {
     ) : LyricsUiState
 }
 
-/**
- * Palet Obsidian Crimson dengan rasio kontras terverifikasi >= 4.5:1 untuk teks
- * dan >= 3.0:1 untuk batas kontrol interaktif serta ring fokus.
- */
 private object LyricsPalette {
-    val SheetBg = Color(0xFF111116)
-    val HeaderSurface = Color(0xFF1B1B22)
-    val ControlSurface = Color(0xFF24242E)
-    val ControlBorder = Color(0xFF6E6E84)
-    val SubtleDivider = Color(0xFF2B2B36)
-    val ActiveLineBg = Color(0xFF291219)
-    val ActiveLineBorder = Color(0xFFFF4D6D)
-    val CrimsonPrimary = Color(0xFFC80028)
-    val AccentText = Color(0xFFFF8FA3)
-    val AccentTextOnDark = Color(0xFFFF758F)
-    val TextPrimary = Color(0xFFF5F5F7)
-    val TextUpcoming = Color(0xFFC8C8D4)
-    val TextMuted = Color(0xFF9696A8)
-    val FocusRing = Color(0xFFF5F5F7)
+    val SheetBg = YtmPalette.SheetBg
+    val HeaderSurface = YtmPalette.HeaderSurface
+    val ControlSurface = YtmPalette.ControlSurface
+    val ControlBorder = YtmPalette.ControlBorder
+    val SubtleDivider = YtmPalette.SubtleDivider
+    val ActiveLineBg = YtmPalette.ActiveTintBg
+    val ActiveLineBorder = YtmPalette.ActiveBorder
+    val CrimsonPrimary = YtmPalette.CrimsonPrimary
+    val AccentText = YtmPalette.AccentText
+    val AccentTextOnDark = YtmPalette.AccentTextOnDark
+    val TextPrimary = YtmPalette.TextPrimary
+    val TextUpcoming = YtmPalette.TextSecondary
+    val TextMuted = YtmPalette.TextMuted
+    val FocusRing = YtmPalette.FocusRing
 }
 
 /**
@@ -494,35 +491,20 @@ private fun ManualLyricsSearchForm(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
             ) {
-                OutlinedButton(
-                    onClick = onCancel,
-                    modifier = Modifier.defaultMinSize(minWidth = 44.dp, minHeight = 44.dp),
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, LyricsPalette.ControlBorder),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = LyricsPalette.ControlSurface,
-                        contentColor = LyricsPalette.TextPrimary
-                    )
-                ) {
-                    Text("Batal", fontSize = 13.sp)
-                }
+                LyricsFocusOutlinedButton(
+                    text = "Batal",
+                    onClick = onCancel
+                )
 
-                Button(
+                LyricsFocusPrimaryButton(
+                    text = "Cari Lirik",
+                    enabled = titleQuery.isNotBlank(),
                     onClick = {
                         if (titleQuery.isNotBlank()) {
                             onSubmit(titleQuery.trim(), artistQuery.trim())
                         }
-                    },
-                    enabled = titleQuery.isNotBlank(),
-                    modifier = Modifier.defaultMinSize(minWidth = 44.dp, minHeight = 44.dp),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = LyricsPalette.CrimsonPrimary,
-                        contentColor = Color.White
-                    )
-                ) {
-                    Text("Cari Lirik", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                }
+                    }
+                )
             }
         }
     }
@@ -904,29 +886,14 @@ private fun LyricsEmptyState(
         )
         Spacer(modifier = Modifier.height(18.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(
-                onClick = onOpenManualSearch,
-                modifier = Modifier.defaultMinSize(minWidth = 44.dp, minHeight = 44.dp),
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, LyricsPalette.ControlBorder),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = LyricsPalette.ControlSurface,
-                    contentColor = LyricsPalette.TextPrimary
-                )
-            ) {
-                Text("Cari Manual", fontSize = 13.sp)
-            }
-            Button(
-                onClick = onDismiss,
-                modifier = Modifier.defaultMinSize(minWidth = 44.dp, minHeight = 44.dp),
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = LyricsPalette.CrimsonPrimary,
-                    contentColor = Color.White
-                )
-            ) {
-                Text("Tutup", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            }
+            LyricsFocusOutlinedButton(
+                text = "Cari Manual",
+                onClick = onOpenManualSearch
+            )
+            LyricsFocusPrimaryButton(
+                text = "Tutup",
+                onClick = onDismiss
+            )
         }
     }
 }
@@ -968,29 +935,14 @@ private fun LyricsNotFoundState(
         )
         Spacer(modifier = Modifier.height(18.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(
-                onClick = onRetry,
-                modifier = Modifier.defaultMinSize(minWidth = 44.dp, minHeight = 44.dp),
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, LyricsPalette.ControlBorder),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = LyricsPalette.ControlSurface,
-                    contentColor = LyricsPalette.TextPrimary
-                )
-            ) {
-                Text("Coba Lagi", fontSize = 13.sp)
-            }
-            Button(
-                onClick = onOpenManualSearch,
-                modifier = Modifier.defaultMinSize(minWidth = 44.dp, minHeight = 44.dp),
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = LyricsPalette.CrimsonPrimary,
-                    contentColor = Color.White
-                )
-            ) {
-                Text("Ubah Kata Kunci", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            }
+            LyricsFocusOutlinedButton(
+                text = "Coba Lagi",
+                onClick = onRetry
+            )
+            LyricsFocusPrimaryButton(
+                text = "Ubah Kata Kunci",
+                onClick = onOpenManualSearch
+            )
         }
     }
 }
@@ -1160,6 +1112,40 @@ private fun LyricsFocusOutlinedButton(
             text = text,
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+private fun LyricsFocusPrimaryButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    shape: RoundedCornerShape = RoundedCornerShape(10.dp)
+) {
+    var isFocused by remember { mutableStateOf(false) }
+
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier
+            .defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
+            .onFocusChanged { isFocused = it.hasFocus },
+        shape = shape,
+        border = if (isFocused) BorderStroke(1.5.dp, LyricsPalette.FocusRing) else null,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = LyricsPalette.CrimsonPrimary,
+            contentColor = Color.White,
+            disabledContainerColor = LyricsPalette.ControlSurface,
+            disabledContentColor = LyricsPalette.TextMuted
+        )
+    ) {
+        Text(
+            text = text,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
             maxLines = 1
         )
     }

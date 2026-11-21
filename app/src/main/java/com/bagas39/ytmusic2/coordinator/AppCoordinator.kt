@@ -80,12 +80,10 @@ class AppCoordinator(private val activity: AppCompatActivity) {
     }
 
     fun onCreate() {
-        // 1. Cek & minta izin notifikasi serta optimasi baterai, lalu jalankan Foreground Service
         PermissionHelper.checkAndRequestNotificationPermission(activity)
         PermissionHelper.requestIgnoreBatteryOptimization(activity)
         startBackgroundMusicService()
 
-        // 2. Inisialisasi komponen UI & Dialog
         viewController = PlayerViewController(activity)
         dialogManager = AppDialogManager(activity)
 
@@ -105,7 +103,6 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         val savedQuality = AudioQuality.fromName(savedQualityName)
         viewController.setAudioQuality(savedQuality)
 
-        // 3. Inisialisasi modul logika & domain
         initModules(savedDataSaver, savedQuality)
         webManager.setDataSaverEnabled(savedDataSaver)
 
@@ -118,10 +115,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
             } catch (_: Exception) {}
         }
 
-        // 4. Hubungkan event UI dari ViewController ke orkestrator
         setupViewControllerEvents()
-
-        // 5. Muat halaman beranda YouTube Music
         webManager.loadHome()
     }
 
@@ -407,9 +401,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         }
     }
 
-    // ==========================================
-    // Event Handlers (Navigasi Player & Download)
-    // ==========================================
+    // Event handlers: navigasi player dan unduhan
 
     fun handlePrevious() {
         if (offlinePlayer.isOfflineActive) {
@@ -665,9 +657,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         )
     }
 
-    // ==========================================
-    // Dialog & Manajemen File Offline
-    // ==========================================
+    // Dialog dan manajemen file offline
 
     fun showOfflineFiles() {
         val files = FileUtils.getOfflineAudioFiles()
@@ -922,9 +912,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         viewController.updateSleepTimerButton(0L)
     }
 
-    // ==========================================
-    // Lifecycle & Back Handlers
-    // ==========================================
+    // Lifecycle dan back handlers
 
     fun onResume() {
         streamOptimizer.setWindowFocused(activity.hasWindowFocus())
