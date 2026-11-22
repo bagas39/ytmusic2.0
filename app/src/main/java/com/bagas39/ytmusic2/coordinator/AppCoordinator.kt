@@ -9,6 +9,10 @@ import androidx.core.content.ContextCompat
 import com.bagas39.ytmusic2.KeepAliveWebView
 import com.bagas39.ytmusic2.MusicBackgroundService
 import com.bagas39.ytmusic2.R
+import com.bagas39.ytmusic2.audiofx.AudioFxManager
+import com.bagas39.ytmusic2.audiofx.AudioFxState
+import com.bagas39.ytmusic2.audiofx.EqualizerPreset
+import com.bagas39.ytmusic2.audiofx.SpeedPreset
 import com.bagas39.ytmusic2.downloader.SongDownloader
 import com.bagas39.ytmusic2.lyrics.LyricsRepository
 import com.bagas39.ytmusic2.player.AudioQuality
@@ -39,6 +43,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
     private lateinit var webManager: YtmWebManager
     private lateinit var adSkipObserver: com.bagas39.ytmusic2.webview.AdSkipObserver
     private lateinit var streamOptimizer: StreamMediaOptimizer
+    private lateinit var audioFxManager: AudioFxManager
     private lateinit var offlinePlayer: OfflinePlayerManager
     private lateinit var downloader: SongDownloader
     private lateinit var viewController: PlayerViewController
@@ -153,6 +158,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
 
         // Web Manager & Ad Skip Observer (Terisolasi dari bypass engine)
         val webView = activity.findViewById<KeepAliveWebView>(R.id.webViewYoutubeMusic)
+        audioFxManager = AudioFxManager(activity, webView)
         streamOptimizer = StreamMediaOptimizer(webView).apply {
             setDataSaverEnabled(initialDataSaver)
             setAudioQuality(initialQuality)
@@ -179,6 +185,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
             onPageLifecycleInject = {
                 adSkipObserver.injectObserverScript()
                 streamOptimizer.injectOptimizerScript()
+                audioFxManager.injectWebAudioFx()
             }
             onTitleDetected = { title ->
                 activity.runOnUiThread {
@@ -253,6 +260,9 @@ class AppCoordinator(private val activity: AppCompatActivity) {
 
         // Offline Player Manager
         offlinePlayer = OfflinePlayerManager().apply {
+            onMediaPlayerPrepared = { mp ->
+                audioFxManager.attachToMediaPlayer(mp)
+            }
             onTrackPrepared = { file, index, total, durationMs ->
                 viewController.showOfflinePlayer(file.nameWithoutExtension, durationMs)
                 viewController.setOfflineHasLocalLyrics(LyricsRepository.hasLocalLyrics(file))
@@ -297,6 +307,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
                 }
             }
             onPlayerStopped = {
+                audioFxManager.detachOfflineEffects()
                 viewController.hideOfflinePlayer()
                 viewController.setOfflineHasLocalLyrics(false)
                 syncLyricsMetaToView()
@@ -912,6 +923,38 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         viewController.updateSleepTimerButton(0L)
     }
 
+    // Kontrol Audio FX (disiapkan untuk UI Audio FX Studio)
+
+    fun getAudioFxState(): AudioFxState = audioFxManager.state
+
+    fun applySpeedPreset(preset: SpeedPreset) {
+        audioFxManager.applySpeedPreset(preset)
+    }
+
+    fun setCustomSpeedAndPitch(speed: Float, pitch: Float) {
+        audioFxManager.setCustomSpeedAndPitch(speed, pitch)
+    }
+
+    fun setBassBoostStrength(strength: Int) {
+        audioFxManager.setBassBoostStrength(strength)
+    }
+
+    fun applyEqualizerPreset(preset: EqualizerPreset) {
+        audioFxManager.applyEqualizerPreset(preset)
+    }
+
+    fun setEqualizerBandGain(bandIndex: Int, gainDb: Float) {
+        audioFxManager.setEqualizerBandGain(bandIndex, gainDb)
+    }
+
+    fun setVolumeNormalizerEnabled(enabled: Boolean) {
+        audioFxManager.setVolumeNormalizerEnabled(enabled)
+    }
+
+    fun resetAudioFx() {
+        audioFxManager.resetAll()
+    }
+
     // Lifecycle dan back handlers
 
     fun onResume() {
@@ -927,6 +970,7 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         webManager.injectBypassScript()
         adSkipObserver.injectObserverScript()
         streamOptimizer.injectOptimizerScript()
+        audioFxManager.injectWebAudioFx()
     }
 
     fun onStop() {
@@ -934,12 +978,14 @@ class AppCoordinator(private val activity: AppCompatActivity) {
         webManager.injectBypassScript()
         adSkipObserver.injectObserverScript()
         streamOptimizer.injectOptimizerScript()
+        audioFxManager.injectWebAudioFx()
     }
 
     fun onDestroy() {
         cancelSleepTimer()
         MusicBackgroundService.controlCallback = null
         MusicBackgroundService.seekCallback = null
+        audioFxManager.release()
         offlinePlayer.release()
         lastNotifTitle = null
         lastNotifArtist = null

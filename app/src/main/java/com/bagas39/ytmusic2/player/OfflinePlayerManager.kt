@@ -10,6 +10,7 @@ import java.io.File
 class OfflinePlayerManager {
 
     var onTrackPrepared: ((file: File, index: Int, total: Int, durationMs: Int) -> Unit)? = null
+    var onMediaPlayerPrepared: ((mediaPlayer: MediaPlayer) -> Unit)? = null
     var onPlaybackStateChanged: ((isPlaying: Boolean) -> Unit)? = null
     var onProgressTick: ((currentMs: Int, totalMs: Int) -> Unit)? = null
     var onPlayerStopped: (() -> Unit)? = null
@@ -158,6 +159,7 @@ class OfflinePlayerManager {
                 setOnPreparedListener { mp ->
                     val duration = mp.duration
                     mp.start()
+                    onMediaPlayerPrepared?.invoke(mp)
                     startSeekUpdater()
                     onTrackPrepared?.invoke(file, currentIndex, playlist.size, duration)
                     onPlaybackStateChanged?.invoke(true)
