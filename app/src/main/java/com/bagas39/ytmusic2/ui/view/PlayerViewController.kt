@@ -12,6 +12,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
@@ -32,7 +33,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -40,10 +40,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -58,7 +55,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
@@ -72,6 +72,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bagas39.ytmusic2.R
+import com.bagas39.ytmusic2.audiofx.AudioFxState
+import com.bagas39.ytmusic2.audiofx.EqualizerPreset
+import com.bagas39.ytmusic2.audiofx.SpeedPreset
 import com.bagas39.ytmusic2.player.AudioQuality
 import com.bagas39.ytmusic2.player.RepeatMode
 import com.bagas39.ytmusic2.ui.theme.YtmPalette
@@ -107,7 +110,7 @@ class PlayerViewController(private val rootView: View) {
     private var adSkipTotalCountState by mutableIntStateOf(0)
     private var adSkipTotalSecondsState by mutableIntStateOf(0)
     private var adSkipTriggerIdState by mutableIntStateOf(0)
-    private var showAdStatsDialogState by mutableStateOf(false)
+    private var controlMenuSheetVisibleState by mutableStateOf(false)
     private var dataSaverEnabledState by mutableStateOf(false)
     private var audioQualityState by mutableStateOf(AudioQuality.AUTO)
 
@@ -120,6 +123,8 @@ class PlayerViewController(private val rootView: View) {
     private var lyricsDurationMsState by mutableLongStateOf(0L)
     private var lyricsIsPlayingState by mutableStateOf(false)
     private var offlineHasLocalLyricsState by mutableStateOf(false)
+    private var audioFxSheetVisibleState by mutableStateOf(false)
+    private var audioFxState by mutableStateOf(AudioFxState())
 
     // Hoisted Events / Callbacks
     var onPreviousClicked: (() -> Unit)? = null
@@ -139,12 +144,25 @@ class PlayerViewController(private val rootView: View) {
     var onLyricsRetryClicked: (() -> Unit)? = null
     var onLyricsManualSearch: ((title: String, artist: String) -> Unit)? = null
     var onLyricsSeekTo: ((positionMs: Long) -> Unit)? = null
+    var onAudioFxClicked: (() -> Unit)? = null
+    var onAudioFxSpeedPresetSelected: ((SpeedPreset) -> Unit)? = null
+    var onAudioFxBassBoostChanged: ((Int) -> Unit)? = null
+    var onAudioFxEqualizerPresetSelected: ((EqualizerPreset) -> Unit)? = null
+    var onAudioFxEqualizerBandChanged: ((bandIndex: Int, gainDb: Float) -> Unit)? = null
+    var onAudioFxNormalizerToggled: ((Boolean) -> Unit)? = null
+    var onAudioFxResetClicked: (() -> Unit)? = null
 
     val isOfflinePlayerVisible: Boolean
         get() = offlineVisibleState
 
     val isLyricsSheetVisible: Boolean
         get() = lyricsSheetVisibleState
+
+    val isAudioFxSheetVisible: Boolean
+        get() = audioFxSheetVisibleState
+
+    val isControlMenuSheetVisible: Boolean
+        get() = controlMenuSheetVisibleState
 
     init {
         setupComposeContent()
@@ -157,7 +175,27 @@ class PlayerViewController(private val rootView: View) {
         composeControlDock.setContent {
             YtmTheme {
                 YtmModernControlDock()
-                AdStatsDialog()
+                ControlMenuSheet(
+                    visible = controlMenuSheetVisibleState,
+                    audioFxState = audioFxState,
+                    sleepTimerRemainingMs = sleepTimerRemainingMsState,
+                    dataSaverEnabled = dataSaverEnabledState,
+                    audioQuality = audioQualityState,
+                    totalAdsSkipped = adSkipTotalCountState,
+                    totalSecondsSaved = adSkipTotalSecondsState,
+                    formattedSavedTime = formatSavedTime(adSkipTotalSecondsState),
+                    onDismiss = { controlMenuSheetVisibleState = false },
+                    onOpenAudioFx = { onAudioFxClicked?.invoke() },
+                    onOpenSleepTimer = { onSleepTimerClicked?.invoke() },
+                    onDataSaverToggled = { isChecked ->
+                        dataSaverEnabledState = isChecked
+                        onDataSaverToggled?.invoke(isChecked)
+                    },
+                    onAudioQualitySelected = { quality ->
+                        audioQualityState = quality
+                        onAudioQualityChanged?.invoke(quality)
+                    }
+                )
                 KaraokeLyricsBottomSheet(
                     visible = lyricsSheetVisibleState,
                     uiState = lyricsContentState,
@@ -175,6 +213,19 @@ class PlayerViewController(private val rootView: View) {
                     onPrevious = { onPreviousClicked?.invoke() },
                     onPlayPause = { onPlayPauseClicked?.invoke() },
                     onNext = { onNextClicked?.invoke() }
+                )
+                AudioFxStudioSheet(
+                    visible = audioFxSheetVisibleState,
+                    state = audioFxState,
+                    onDismiss = { audioFxSheetVisibleState = false },
+                    onSelectSpeedPreset = { preset -> onAudioFxSpeedPresetSelected?.invoke(preset) },
+                    onBassBoostChanged = { strength -> onAudioFxBassBoostChanged?.invoke(strength) },
+                    onSelectEqualizerPreset = { preset -> onAudioFxEqualizerPresetSelected?.invoke(preset) },
+                    onEqualizerBandChanged = { index, gainDb ->
+                        onAudioFxEqualizerBandChanged?.invoke(index, gainDb)
+                    },
+                    onVolumeNormalizerToggled = { enabled -> onAudioFxNormalizerToggled?.invoke(enabled) },
+                    onResetAll = { onAudioFxResetClicked?.invoke() }
                 )
             }
         }
@@ -225,11 +276,11 @@ class PlayerViewController(private val rootView: View) {
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 HorizontalDivider(
-                    thickness = 1.dp,
-                    color = YtmPalette.SubtleDivider
+                    thickness = 1.5.dp,
+                    color = YtmPalette.CrimsonHairline.copy(alpha = 0.85f)
                 )
 
-                // Handle geser/ketuk untuk melipat atau membuka dock kontrol
+                // Handle geser/ketuk berpanah chevron untuk melipat atau membuka dock kontrol
                 Surface(
                     color = Color.Transparent,
                     border = if (isHandleFocused) BorderStroke(1.5.dp, YtmPalette.FocusRing) else null,
@@ -266,27 +317,50 @@ class PlayerViewController(private val rootView: View) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .width(if (isDockExpanded) 36.dp else 28.dp)
-                                .height(4.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(
-                                    if (isDockExpanded) YtmPalette.ControlBorder else YtmPalette.ActiveBorder
+                        if (isDockExpanded) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(28.dp)
+                                        .height(3.5.dp)
+                                        .clip(RoundedCornerShape(2.dp))
+                                        .background(YtmPalette.ActiveBorder)
                                 )
-                        )
-                        if (!isDockExpanded) {
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = "Buka Menu Kontrol",
-                                color = YtmPalette.TextSecondary,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium
-                            )
+                                DockChevronIcon(
+                                    pointingUp = false,
+                                    color = YtmPalette.ActiveBorder
+                                )
+                            }
+                        } else {
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = YtmPalette.ActiveTintBg,
+                                border = BorderStroke(1.dp, YtmPalette.ActiveBorder)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    DockChevronIcon(
+                                        pointingUp = true,
+                                        color = YtmPalette.ActiveBorder
+                                    )
+                                    Text(
+                                        text = "Buka Menu Kontrol",
+                                        color = YtmPalette.TextPrimary,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -320,7 +394,7 @@ class PlayerViewController(private val rootView: View) {
                             var isSkipBannerFocused by remember { mutableStateOf(false) }
 
                             Surface(
-                                onClick = { showAdStatsDialogState = true },
+                                onClick = { controlMenuSheetVisibleState = true },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 2.dp)
@@ -582,12 +656,14 @@ class PlayerViewController(private val rootView: View) {
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 DockQuickButton(
                                     label = "Unduh",
+                                    icon = DockIconType.DOWNLOAD,
                                     isActive = false,
+                                    iconTintOverride = YtmPalette.ActiveBorder,
                                     contentDescription = "Unduh lagu yang sedang diputar",
                                     modifier = Modifier.weight(1f),
                                     onClick = { onDownloadClicked?.invoke() }
@@ -595,6 +671,7 @@ class PlayerViewController(private val rootView: View) {
 
                                 DockQuickButton(
                                     label = "Lirik",
+                                    icon = DockIconType.LYRICS,
                                     isActive = lyricsSheetVisibleState,
                                     contentDescription = "Buka panel lirik",
                                     modifier = Modifier.weight(1f),
@@ -603,46 +680,42 @@ class PlayerViewController(private val rootView: View) {
 
                                 DockQuickButton(
                                     label = "Offline",
+                                    icon = DockIconType.OFFLINE,
                                     isActive = offlineVisibleState,
                                     contentDescription = "Buka daftar lagu offline",
                                     modifier = Modifier.weight(1f),
                                     onClick = { onOfflineClicked?.invoke() }
                                 )
 
-                                val isTimerActive = sleepTimerRemainingMsState > 0L
-                                val timerLabel = if (isTimerActive) {
-                                    FormatUtils.formatDuration(sleepTimerRemainingMsState.toInt())
-                                } else {
-                                    "Timer"
-                                }
+                                val hasActiveMenuSettings = audioFxState.isAnyEffectActive ||
+                                    sleepTimerRemainingMsState > 0L ||
+                                    dataSaverEnabledState
                                 DockQuickButton(
-                                    label = timerLabel,
-                                    isActive = isTimerActive,
-                                    contentDescription = if (isTimerActive) {
-                                        "Sleep timer aktif, sisa $timerLabel"
-                                    } else {
-                                        "Atur pengatur waktu tidur"
-                                    },
+                                    label = "Menu",
+                                    icon = DockIconType.MENU,
+                                    isActive = controlMenuSheetVisibleState || audioFxSheetVisibleState,
+                                    hasIndicatorDot = hasActiveMenuSettings,
+                                    contentDescription = "Buka menu pengaturan, Audio FX, kualitas audio, dan sleep timer",
                                     modifier = Modifier.weight(1f),
-                                    onClick = { onSleepTimerClicked?.invoke() }
+                                    onClick = { controlMenuSheetVisibleState = true }
                                 )
                             }
 
                             if (!adSkipPopupVisibleState) {
-                                val statusText = if (adSkipTotalCountState > 0) {
+                                val statsPrefix = if (adSkipTotalCountState > 0) {
                                     val saverTag = if (dataSaverEnabledState) " · Audio Saja aktif" else ""
                                     "$adSkipTotalCountState iklan dilewati · ${formatSavedTime(adSkipTotalSecondsState)} dihemat$saverTag"
                                 } else {
                                     if (dataSaverEnabledState) {
-                                        "YTM Shield · Mode Audio Saja aktif"
+                                        "YTM Shield · Audio Saja aktif"
                                     } else {
-                                        "YTM Shield · Statistik & hemat data"
+                                        "YTM Shield · Pengaturan"
                                     }
                                 }
                                 var isStatusFocused by remember { mutableStateOf(false) }
 
                                 Surface(
-                                    onClick = { showAdStatsDialogState = true },
+                                    onClick = { controlMenuSheetVisibleState = true },
                                     color = Color.Transparent,
                                     shape = RoundedCornerShape(8.dp),
                                     border = if (isStatusFocused) {
@@ -655,17 +728,18 @@ class PlayerViewController(private val rootView: View) {
                                         .heightIn(min = 44.dp)
                                         .onFocusChanged { isStatusFocused = it.hasFocus }
                                         .semantics(mergeDescendants = true) {
-                                            contentDescription = "$statusText, ketuk untuk pengaturan dan statistik"
+                                            contentDescription = "$statsPrefix, ketuk untuk menu pengaturan dan statistik"
                                         }
                                 ) {
-                                    Box(
+                                    Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .padding(horizontal = 8.dp, vertical = 10.dp),
-                                        contentAlignment = Alignment.Center
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = statusText,
+                                            text = statsPrefix,
                                             color = if (dataSaverEnabledState) {
                                                 YtmPalette.AccentText
                                             } else {
@@ -673,7 +747,15 @@ class PlayerViewController(private val rootView: View) {
                                             },
                                             fontSize = 11.5.sp,
                                             maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false)
+                                        )
+                                        Text(
+                                            text = " · Menu >",
+                                            color = YtmPalette.AccentText,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1
                                         )
                                     }
                                 }
@@ -765,11 +847,85 @@ class PlayerViewController(private val rootView: View) {
         }
     }
 
+    private enum class DockIconType {
+        DOWNLOAD,
+        LYRICS,
+        OFFLINE,
+        MENU
+    }
+
+    @Composable
+    private fun DockChevronIcon(pointingUp: Boolean, color: Color) {
+        Canvas(modifier = Modifier.size(width = 14.dp, height = 8.dp)) {
+            val stroke = 2.dp.toPx()
+            val padX = size.width * 0.12f
+            val midX = size.width * 0.5f
+            val topY = if (pointingUp) size.height * 0.8f else size.height * 0.2f
+            val tipY = if (pointingUp) size.height * 0.2f else size.height * 0.8f
+            drawLine(
+                color = color,
+                start = Offset(padX, topY),
+                end = Offset(midX, tipY),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                color = color,
+                start = Offset(midX, tipY),
+                end = Offset(size.width - padX, topY),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round
+            )
+        }
+    }
+
+    @Composable
+    private fun DockVectorIcon(type: DockIconType, tint: Color) {
+        Canvas(modifier = Modifier.size(14.dp)) {
+            val stroke = 1.8.dp.toPx()
+            val w = size.width
+            val h = size.height
+            when (type) {
+                DockIconType.DOWNLOAD -> {
+                    val midX = w * 0.5f
+                    drawLine(tint, Offset(midX, h * 0.14f), Offset(midX, h * 0.66f), strokeWidth = stroke, cap = StrokeCap.Round)
+                    drawLine(tint, Offset(w * 0.26f, h * 0.44f), Offset(midX, h * 0.68f), strokeWidth = stroke, cap = StrokeCap.Round)
+                    drawLine(tint, Offset(w * 0.74f, h * 0.44f), Offset(midX, h * 0.68f), strokeWidth = stroke, cap = StrokeCap.Round)
+                    drawLine(tint, Offset(w * 0.18f, h * 0.86f), Offset(w * 0.82f, h * 0.86f), strokeWidth = stroke, cap = StrokeCap.Round)
+                }
+                DockIconType.LYRICS -> {
+                    drawLine(tint, Offset(w * 0.14f, h * 0.24f), Offset(w * 0.86f, h * 0.24f), strokeWidth = stroke, cap = StrokeCap.Round)
+                    drawLine(YtmPalette.ActiveBorder, Offset(w * 0.14f, h * 0.50f), Offset(w * 0.66f, h * 0.50f), strokeWidth = stroke, cap = StrokeCap.Round)
+                    drawLine(tint, Offset(w * 0.14f, h * 0.76f), Offset(w * 0.76f, h * 0.76f), strokeWidth = stroke, cap = StrokeCap.Round)
+                }
+                DockIconType.OFFLINE -> {
+                    drawCircle(
+                        color = tint,
+                        radius = w * 0.38f,
+                        style = Stroke(width = stroke)
+                    )
+                    drawCircle(
+                        color = tint,
+                        radius = w * 0.12f
+                    )
+                }
+                DockIconType.MENU -> {
+                    drawLine(tint, Offset(w * 0.16f, h * 0.25f), Offset(w * 0.84f, h * 0.25f), strokeWidth = stroke, cap = StrokeCap.Round)
+                    drawLine(tint, Offset(w * 0.16f, h * 0.50f), Offset(w * 0.84f, h * 0.50f), strokeWidth = stroke, cap = StrokeCap.Round)
+                    drawLine(tint, Offset(w * 0.16f, h * 0.75f), Offset(w * 0.84f, h * 0.75f), strokeWidth = stroke, cap = StrokeCap.Round)
+                }
+            }
+        }
+    }
+
     @Composable
     private fun DockQuickButton(
         label: String,
+        icon: DockIconType,
         isActive: Boolean,
         modifier: Modifier = Modifier,
+        iconTintOverride: Color? = null,
+        hasIndicatorDot: Boolean = false,
         contentDescription: String? = null,
         onClick: () -> Unit
     ) {
@@ -781,11 +937,12 @@ class PlayerViewController(private val rootView: View) {
             else -> YtmPalette.ControlBorder
         }
         val textColor = if (isActive) YtmPalette.AccentText else YtmPalette.TextPrimary
+        val iconColor = iconTintOverride ?: if (isActive) YtmPalette.ActiveBorder else YtmPalette.TextSecondary
 
         OutlinedButton(
             onClick = onClick,
             modifier = modifier
-                .height(44.dp)
+                .height(46.dp)
                 .onFocusChanged { isFocused = it.hasFocus }
                 .then(
                     if (contentDescription != null) {
@@ -805,228 +962,27 @@ class PlayerViewController(private val rootView: View) {
             border = BorderStroke(width = if (isFocused) 1.5.dp else 1.dp, color = borderColor),
             contentPadding = PaddingValues(horizontal = 6.dp)
         ) {
-            Text(
-                text = label,
-                fontSize = 12.sp,
-                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-
-    @Composable
-    private fun AdStatsDialog() {
-        if (!showAdStatsDialogState) return
-
-        val totalAds = adSkipTotalCountState
-        val totalSeconds = adSkipTotalSecondsState
-        // Estimasi rata-rata bitrate stream video iklan 480p (~165 KB/detik)
-        val dataSavedMb = String.format("%.1f MB", (totalSeconds * 0.165f))
-        var isCloseFocused by remember { mutableStateOf(false) }
-
-        AlertDialog(
-            onDismissRequest = { showAdStatsDialogState = false },
-            confirmButton = {
-                TextButton(
-                    onClick = { showAdStatsDialogState = false },
-                    modifier = Modifier
-                        .defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
-                        .onFocusChanged { isCloseFocused = it.hasFocus },
-                    border = if (isCloseFocused) BorderStroke(1.5.dp, YtmPalette.FocusRing) else null,
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text("Tutup", color = YtmPalette.AccentTextOnDark, fontWeight = FontWeight.SemiBold)
-                }
-            },
-            containerColor = YtmPalette.DialogSurface,
-            shape = RoundedCornerShape(16.dp),
-            title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                DockVectorIcon(type = icon, tint = iconColor)
                 Text(
-                    text = "Statistik & Penghemat Data",
-                    color = YtmPalette.TextPrimary,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold
+                    text = label,
+                    fontSize = 12.sp,
+                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = YtmPalette.DialogCard,
-                        border = BorderStroke(1.dp, YtmPalette.ControlBorder),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            StatRow("Iklan dilewati", "$totalAds")
-                            HorizontalDivider(thickness = 0.5.dp, color = YtmPalette.SubtleDivider)
-                            StatRow("Waktu dihemat", formatSavedTime(totalSeconds))
-                            HorizontalDivider(thickness = 0.5.dp, color = YtmPalette.SubtleDivider)
-                            StatRow("Estimasi kuota iklan (480p)", dataSavedMb)
-                        }
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = YtmPalette.DialogCard,
-                        border = BorderStroke(1.dp, YtmPalette.ControlBorder),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                                Text(
-                                    text = "Mode Audio Saja",
-                                    color = YtmPalette.TextPrimary,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = "Kunci video ke 144p untuk menghemat kuota tanpa menurunkan kualitas audio",
-                                    color = YtmPalette.TextMuted,
-                                    fontSize = 11.5.sp,
-                                    lineHeight = 16.sp
-                                )
-                            }
-                            Switch(
-                                checked = dataSaverEnabledState,
-                                onCheckedChange = { isChecked ->
-                                    dataSaverEnabledState = isChecked
-                                    onDataSaverToggled?.invoke(isChecked)
-                                },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = YtmPalette.CrimsonPrimary,
-                                    uncheckedThumbColor = YtmPalette.TextSecondary,
-                                    uncheckedTrackColor = YtmPalette.ControlSurface,
-                                    uncheckedBorderColor = YtmPalette.ControlBorder
-                                )
-                            )
-                        }
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = YtmPalette.DialogCard,
-                        border = BorderStroke(1.dp, YtmPalette.ControlBorder),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Column {
-                                Text(
-                                    text = "Kualitas Audio",
-                                    color = YtmPalette.TextPrimary,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = "Berlaku untuk streaming online dan unduhan offline",
-                                    color = YtmPalette.TextMuted,
-                                    fontSize = 11.5.sp
-                                )
-                            }
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                AudioQuality.entries.chunked(2).forEach { pair ->
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        pair.forEach { q ->
-                                            val isSelected = audioQualityState == q
-                                            var isChipFocused by remember { mutableStateOf(false) }
-                                            val chipBorder = when {
-                                                isChipFocused -> YtmPalette.FocusRing
-                                                isSelected -> YtmPalette.ActiveBorder
-                                                else -> YtmPalette.ControlBorder
-                                            }
-                                            Surface(
-                                                onClick = {
-                                                    audioQualityState = q
-                                                    onAudioQualityChanged?.invoke(q)
-                                                },
-                                                shape = RoundedCornerShape(8.dp),
-                                                color = if (isSelected) YtmPalette.CrimsonPrimary else YtmPalette.ControlSurface,
-                                                border = BorderStroke(
-                                                    width = if (isChipFocused) 1.5.dp else 1.dp,
-                                                    color = chipBorder
-                                                ),
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .heightIn(min = 48.dp)
-                                                    .onFocusChanged { isChipFocused = it.hasFocus }
-                                                    .semantics(mergeDescendants = true) {
-                                                        selected = isSelected
-                                                        contentDescription = "${q.displayName}, ${q.bitrateLabel}"
-                                                    }
-                                            ) {
-                                                Column(
-                                                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 8.dp),
-                                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                                    verticalArrangement = Arrangement.Center
-                                                ) {
-                                                    Text(
-                                                        text = q.displayName,
-                                                        color = if (isSelected) Color.White else YtmPalette.TextPrimary,
-                                                        fontSize = 12.sp,
-                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                    Text(
-                                                        text = q.bitrateLabel,
-                                                        color = if (isSelected) {
-                                                            YtmPalette.CrimsonSubtext
-                                                        } else {
-                                                            YtmPalette.TextMutedOnControl
-                                                        },
-                                                        fontSize = 10.5.sp,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                if (hasIndicatorDot && !isActive) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(YtmPalette.ActiveBorder)
+                    )
                 }
             }
-        )
-    }
-
-    @Composable
-    private fun StatRow(label: String, value: String) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(text = label, color = YtmPalette.TextMuted, fontSize = 12.5.sp)
-            Text(
-                text = value,
-                color = YtmPalette.TextPrimary,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                fontFamily = FontFamily.Monospace
-            )
         }
     }
 
@@ -1099,6 +1055,26 @@ class PlayerViewController(private val rootView: View) {
 
     fun hideLyricsSheet() {
         lyricsSheetVisibleState = false
+    }
+
+    fun showAudioFxSheet() {
+        audioFxSheetVisibleState = true
+    }
+
+    fun hideAudioFxSheet() {
+        audioFxSheetVisibleState = false
+    }
+
+    fun updateAudioFxState(state: AudioFxState) {
+        audioFxState = state
+    }
+
+    fun showControlMenuSheet() {
+        controlMenuSheetVisibleState = true
+    }
+
+    fun hideControlMenuSheet() {
+        controlMenuSheetVisibleState = false
     }
 
     fun setLyricsUiState(state: LyricsUiState) {

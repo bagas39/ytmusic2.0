@@ -14,12 +14,13 @@ object YtmPalette {
     val SubtleDivider = Color(0xFF2B2B36)
     val ControlBorder = Color(0xFF6E6E84)
 
-    val CrimsonPrimary = Color(0xFFC80028)
-    val ActiveTintBg = Color(0xFF291219)
+    val CrimsonPrimary = Color(0xFFD4002A)
+    val CrimsonHairline = Color(0xFFD4002A)
+    val ActiveTintBg = Color(0xFF2B1018)
     val ActiveBorder = Color(0xFFFF4D6D)
-    val AccentText = Color(0xFFFF8FA3)
-    val AccentTextOnDark = Color(0xFFFF758F)
-    val CrimsonSubtext = Color(0xFFFDE8EC)
+    val AccentText = Color(0xFFFF859B)
+    val AccentTextOnDark = Color(0xFFFF5C7A)
+    val CrimsonSubtext = Color(0xFFFFF0F3)
 
     val TextPrimary = Color(0xFFF5F5F7)
     val TextSecondary = Color(0xFFC8C8D4)

@@ -158,7 +158,14 @@ class AppCoordinator(private val activity: AppCompatActivity) {
 
         // Web Manager & Ad Skip Observer (Terisolasi dari bypass engine)
         val webView = activity.findViewById<KeepAliveWebView>(R.id.webViewYoutubeMusic)
-        audioFxManager = AudioFxManager(activity, webView)
+        audioFxManager = AudioFxManager(activity, webView).apply {
+            onStateChanged = { fxState ->
+                activity.runOnUiThread {
+                    viewController.updateAudioFxState(fxState)
+                }
+            }
+        }
+        viewController.updateAudioFxState(audioFxManager.state)
         streamOptimizer = StreamMediaOptimizer(webView).apply {
             setDataSaverEnabled(initialDataSaver)
             setAudioQuality(initialQuality)
@@ -348,6 +355,30 @@ class AppCoordinator(private val activity: AppCompatActivity) {
             loadLyricsCustomQuery(queryTitle, queryArtist)
         }
         viewController.onLyricsSeekTo = { positionMs -> handleSeekTo(positionMs) }
+        viewController.onAudioFxClicked = {
+            viewController.updateAudioFxState(audioFxManager.state)
+            viewController.showAudioFxSheet()
+        }
+        viewController.onAudioFxSpeedPresetSelected = { preset ->
+            audioFxManager.applySpeedPreset(preset)
+            Toast.makeText(activity, "Mode Audio: ${preset.displayName}", Toast.LENGTH_SHORT).show()
+        }
+        viewController.onAudioFxBassBoostChanged = { strength ->
+            audioFxManager.setBassBoostStrength(strength)
+        }
+        viewController.onAudioFxEqualizerPresetSelected = { preset ->
+            audioFxManager.applyEqualizerPreset(preset)
+        }
+        viewController.onAudioFxEqualizerBandChanged = { index, gainDb ->
+            audioFxManager.setEqualizerBandGain(index, gainDb)
+        }
+        viewController.onAudioFxNormalizerToggled = { enabled ->
+            audioFxManager.setVolumeNormalizerEnabled(enabled)
+        }
+        viewController.onAudioFxResetClicked = {
+            audioFxManager.resetAll()
+            Toast.makeText(activity, "Audio FX direset ke Normal", Toast.LENGTH_SHORT).show()
+        }
         viewController.onOfflineClicked = { showOfflineFiles() }
         viewController.onSleepTimerClicked = { showSleepTimerOptions() }
         viewController.onOfflineCloseClicked = { offlinePlayer.stop() }
@@ -995,6 +1026,14 @@ class AppCoordinator(private val activity: AppCompatActivity) {
     }
 
     fun handleBackPressed(): Boolean {
+        if (viewController.isAudioFxSheetVisible) {
+            viewController.hideAudioFxSheet()
+            return true
+        }
+        if (viewController.isControlMenuSheetVisible) {
+            viewController.hideControlMenuSheet()
+            return true
+        }
         if (viewController.isLyricsSheetVisible) {
             viewController.hideLyricsSheet()
             return true
