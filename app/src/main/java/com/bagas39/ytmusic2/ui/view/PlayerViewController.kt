@@ -269,6 +269,9 @@ class PlayerViewController(private val rootView: View) {
 
         var isDockExpanded by remember { mutableStateOf(true) }
         var isHandleFocused by remember { mutableStateOf(false) }
+        val hasActiveMenuSettings = audioFxState.isAnyEffectActive ||
+            sleepTimerRemainingMsState > 0L ||
+            dataSaverEnabledState
 
         Surface(
             modifier = Modifier.fillMaxWidth(),
@@ -276,18 +279,18 @@ class PlayerViewController(private val rootView: View) {
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 HorizontalDivider(
-                    thickness = 1.5.dp,
-                    color = YtmPalette.CrimsonHairline.copy(alpha = 0.85f)
+                    thickness = 0.75.dp,
+                    color = YtmPalette.SubtleDivider
                 )
 
-                // Handle geser/ketuk berpanah chevron untuk melipat atau membuka dock kontrol
+                // Handle geser/ketuk untuk melipat atau membuka dock kontrol
                 Surface(
                     color = Color.Transparent,
                     border = if (isHandleFocused) BorderStroke(1.5.dp, YtmPalette.FocusRing) else null,
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 44.dp)
+                        .heightIn(min = if (isDockExpanded) 28.dp else 38.dp)
                         .pointerInput(Unit) {
                             detectVerticalDragGestures { _, dragAmount ->
                                 if (dragAmount > 12) {
@@ -317,36 +320,38 @@ class PlayerViewController(private val rootView: View) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .padding(horizontal = 16.dp, vertical = if (isDockExpanded) 6.dp else 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
                         if (isDockExpanded) {
                             DockChevronIcon(
                                 pointingUp = false,
-                                color = YtmPalette.ActiveBorder,
-                                modifier = Modifier.size(width = 18.dp, height = 9.dp)
+                                color = YtmPalette.TextMuted,
+                                modifier = Modifier.size(width = 15.dp, height = 6.5.dp)
                             )
                         } else {
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = YtmPalette.ActiveTintBg,
-                                border = BorderStroke(1.dp, YtmPalette.ActiveBorder)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    DockChevronIcon(
-                                        pointingUp = true,
-                                        color = YtmPalette.ActiveBorder
-                                    )
-                                    Text(
-                                        text = "Buka Kontrol",
-                                        color = YtmPalette.TextPrimary,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold
+                                DockChevronIcon(
+                                    pointingUp = true,
+                                    color = YtmPalette.TextSecondary,
+                                    modifier = Modifier.size(width = 14.dp, height = 6.dp)
+                                )
+                                Text(
+                                    text = "Kontrol",
+                                    color = YtmPalette.TextSecondary,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                if (hasActiveMenuSettings) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(5.dp)
+                                            .clip(CircleShape)
+                                            .background(YtmPalette.CrimsonPrimary)
                                     )
                                 }
                             }
@@ -590,8 +595,8 @@ class PlayerViewController(private val rootView: View) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                .padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             if (offlineVisibleState || isTvMode) {
                                 Row(
@@ -652,7 +657,6 @@ class PlayerViewController(private val rootView: View) {
                                     label = "Unduh",
                                     icon = DockIconType.DOWNLOAD,
                                     isActive = false,
-                                    iconTintOverride = YtmPalette.ActiveBorder,
                                     contentDescription = "Unduh lagu yang sedang diputar",
                                     modifier = Modifier.weight(1f),
                                     onClick = { onDownloadClicked?.invoke() }
@@ -676,9 +680,6 @@ class PlayerViewController(private val rootView: View) {
                                     onClick = { onOfflineClicked?.invoke() }
                                 )
 
-                                val hasActiveMenuSettings = audioFxState.isAnyEffectActive ||
-                                    sleepTimerRemainingMsState > 0L ||
-                                    dataSaverEnabledState
                                 DockQuickButton(
                                     label = "Menu",
                                     icon = DockIconType.MENU,
@@ -698,7 +699,7 @@ class PlayerViewController(private val rootView: View) {
                                     if (dataSaverEnabledState) {
                                         "YTM Shield · Audio Saja aktif"
                                     } else {
-                                        "YTM Shield aktif · Tanpa iklan"
+                                        "YTM Shield aktif"
                                     }
                                 }
                                 var isStatusFocused by remember { mutableStateOf(false) }
@@ -714,7 +715,7 @@ class PlayerViewController(private val rootView: View) {
                                     },
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .heightIn(min = 44.dp)
+                                        .heightIn(min = 28.dp)
                                         .onFocusChanged { isStatusFocused = it.hasFocus }
                                         .semantics(mergeDescendants = true) {
                                             contentDescription = "$statsPrefix, ketuk untuk statistik YTM Shield dan pengaturan"
@@ -723,7 +724,7 @@ class PlayerViewController(private val rootView: View) {
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                                            .padding(horizontal = 8.dp, vertical = 5.dp),
                                         horizontalArrangement = Arrangement.Center,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
@@ -734,7 +735,7 @@ class PlayerViewController(private val rootView: View) {
                                             } else {
                                                 YtmPalette.TextMuted
                                             },
-                                            fontSize = 11.5.sp,
+                                            fontSize = 11.sp,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier.weight(1f, fill = false)
@@ -843,7 +844,7 @@ class PlayerViewController(private val rootView: View) {
         modifier: Modifier = Modifier.size(width = 14.dp, height = 8.dp)
     ) {
         Canvas(modifier = modifier) {
-            val stroke = 2.dp.toPx()
+            val stroke = 1.6.dp.toPx()
             val padX = size.width * 0.12f
             val midX = size.width * 0.5f
             val topY = if (pointingUp) size.height * 0.8f else size.height * 0.2f
@@ -881,7 +882,7 @@ class PlayerViewController(private val rootView: View) {
                 }
                 DockIconType.LYRICS -> {
                     drawLine(tint, Offset(w * 0.14f, h * 0.24f), Offset(w * 0.86f, h * 0.24f), strokeWidth = stroke, cap = StrokeCap.Round)
-                    drawLine(YtmPalette.ActiveBorder, Offset(w * 0.14f, h * 0.50f), Offset(w * 0.66f, h * 0.50f), strokeWidth = stroke, cap = StrokeCap.Round)
+                    drawLine(tint, Offset(w * 0.14f, h * 0.50f), Offset(w * 0.66f, h * 0.50f), strokeWidth = stroke, cap = StrokeCap.Round)
                     drawLine(tint, Offset(w * 0.14f, h * 0.76f), Offset(w * 0.76f, h * 0.76f), strokeWidth = stroke, cap = StrokeCap.Round)
                 }
                 DockIconType.OFFLINE -> {
@@ -910,7 +911,6 @@ class PlayerViewController(private val rootView: View) {
         icon: DockIconType,
         isActive: Boolean,
         modifier: Modifier = Modifier,
-        iconTintOverride: Color? = null,
         hasIndicatorDot: Boolean = false,
         contentDescription: String? = null,
         onClick: () -> Unit
@@ -920,15 +920,15 @@ class PlayerViewController(private val rootView: View) {
         val borderColor = when {
             isFocused -> YtmPalette.FocusRing
             isActive -> YtmPalette.ActiveBorder
-            else -> YtmPalette.ControlBorder
+            else -> YtmPalette.DockBorder
         }
         val textColor = if (isActive) YtmPalette.AccentText else YtmPalette.TextPrimary
-        val iconColor = iconTintOverride ?: if (isActive) YtmPalette.ActiveBorder else YtmPalette.TextSecondary
+        val iconColor = if (isActive) YtmPalette.ActiveBorder else YtmPalette.TextPrimary.copy(alpha = 0.85f)
 
         OutlinedButton(
             onClick = onClick,
             modifier = modifier
-                .height(46.dp)
+                .height(42.dp)
                 .onFocusChanged { isFocused = it.hasFocus }
                 .then(
                     if (contentDescription != null) {
@@ -963,9 +963,9 @@ class PlayerViewController(private val rootView: View) {
                 if (hasIndicatorDot && !isActive) {
                     Box(
                         modifier = Modifier
-                            .size(6.dp)
+                            .size(5.dp)
                             .clip(CircleShape)
-                            .background(YtmPalette.ActiveBorder)
+                            .background(YtmPalette.CrimsonPrimary)
                     )
                 }
             }
