@@ -306,9 +306,9 @@ class PlayerViewController(private val rootView: View) {
                                     .clickable { isDockExpanded = !isDockExpanded }
                                     .semantics(mergeDescendants = true) {
                                         contentDescription = if (isDockExpanded) {
-                                            "Sembunyikan menu kontrol"
+                                            "Sembunyikan panel kontrol"
                                         } else {
-                                            "Buka menu kontrol"
+                                            "Buka panel kontrol"
                                         }
                                     }
                             }
@@ -322,22 +322,11 @@ class PlayerViewController(private val rootView: View) {
                         horizontalArrangement = Arrangement.Center
                     ) {
                         if (isDockExpanded) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .width(28.dp)
-                                        .height(3.5.dp)
-                                        .clip(RoundedCornerShape(2.dp))
-                                        .background(YtmPalette.ActiveBorder)
-                                )
-                                DockChevronIcon(
-                                    pointingUp = false,
-                                    color = YtmPalette.ActiveBorder
-                                )
-                            }
+                            DockChevronIcon(
+                                pointingUp = false,
+                                color = YtmPalette.ActiveBorder,
+                                modifier = Modifier.size(width = 18.dp, height = 9.dp)
+                            )
                         } else {
                             Surface(
                                 shape = RoundedCornerShape(16.dp),
@@ -354,7 +343,7 @@ class PlayerViewController(private val rootView: View) {
                                         color = YtmPalette.ActiveBorder
                                     )
                                     Text(
-                                        text = "Buka Menu Kontrol",
+                                        text = "Buka Kontrol",
                                         color = YtmPalette.TextPrimary,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.SemiBold
@@ -709,7 +698,7 @@ class PlayerViewController(private val rootView: View) {
                                     if (dataSaverEnabledState) {
                                         "YTM Shield · Audio Saja aktif"
                                     } else {
-                                        "YTM Shield · Pengaturan"
+                                        "YTM Shield aktif · Tanpa iklan"
                                     }
                                 }
                                 var isStatusFocused by remember { mutableStateOf(false) }
@@ -728,7 +717,7 @@ class PlayerViewController(private val rootView: View) {
                                         .heightIn(min = 44.dp)
                                         .onFocusChanged { isStatusFocused = it.hasFocus }
                                         .semantics(mergeDescendants = true) {
-                                            contentDescription = "$statsPrefix, ketuk untuk menu pengaturan dan statistik"
+                                            contentDescription = "$statsPrefix, ketuk untuk statistik YTM Shield dan pengaturan"
                                         }
                                 ) {
                                     Row(
@@ -749,13 +738,6 @@ class PlayerViewController(private val rootView: View) {
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier.weight(1f, fill = false)
-                                        )
-                                        Text(
-                                            text = " · Menu >",
-                                            color = YtmPalette.AccentText,
-                                            fontSize = 11.5.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1
                                         )
                                     }
                                 }
@@ -855,8 +837,12 @@ class PlayerViewController(private val rootView: View) {
     }
 
     @Composable
-    private fun DockChevronIcon(pointingUp: Boolean, color: Color) {
-        Canvas(modifier = Modifier.size(width = 14.dp, height = 8.dp)) {
+    private fun DockChevronIcon(
+        pointingUp: Boolean,
+        color: Color,
+        modifier: Modifier = Modifier.size(width = 14.dp, height = 8.dp)
+    ) {
+        Canvas(modifier = modifier) {
             val stroke = 2.dp.toPx()
             val padX = size.width * 0.12f
             val midX = size.width * 0.5f
