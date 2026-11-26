@@ -111,6 +111,7 @@ class PlayerViewController(private val rootView: View) {
     private var adSkipTotalSecondsState by mutableIntStateOf(0)
     private var adSkipTriggerIdState by mutableIntStateOf(0)
     private var controlMenuSheetVisibleState by mutableStateOf(false)
+    private var shieldStatsSheetVisibleState by mutableStateOf(false)
     private var dataSaverEnabledState by mutableStateOf(false)
     private var audioQualityState by mutableStateOf(AudioQuality.AUTO)
 
@@ -164,6 +165,9 @@ class PlayerViewController(private val rootView: View) {
     val isControlMenuSheetVisible: Boolean
         get() = controlMenuSheetVisibleState
 
+    val isShieldStatsSheetVisible: Boolean
+        get() = shieldStatsSheetVisibleState
+
     init {
         setupComposeContent()
     }
@@ -179,21 +183,25 @@ class PlayerViewController(private val rootView: View) {
                     visible = controlMenuSheetVisibleState,
                     audioFxState = audioFxState,
                     sleepTimerRemainingMs = sleepTimerRemainingMsState,
-                    dataSaverEnabled = dataSaverEnabledState,
                     audioQuality = audioQualityState,
-                    totalAdsSkipped = adSkipTotalCountState,
-                    totalSecondsSaved = adSkipTotalSecondsState,
-                    formattedSavedTime = formatSavedTime(adSkipTotalSecondsState),
                     onDismiss = { controlMenuSheetVisibleState = false },
                     onOpenAudioFx = { onAudioFxClicked?.invoke() },
                     onOpenSleepTimer = { onSleepTimerClicked?.invoke() },
-                    onDataSaverToggled = { isChecked ->
-                        dataSaverEnabledState = isChecked
-                        onDataSaverToggled?.invoke(isChecked)
-                    },
                     onAudioQualitySelected = { quality ->
                         audioQualityState = quality
                         onAudioQualityChanged?.invoke(quality)
+                    }
+                )
+                YtmShieldStatsSheet(
+                    visible = shieldStatsSheetVisibleState,
+                    totalAdsSkipped = adSkipTotalCountState,
+                    totalSecondsSaved = adSkipTotalSecondsState,
+                    formattedSavedTime = formatSavedTime(adSkipTotalSecondsState),
+                    dataSaverEnabled = dataSaverEnabledState,
+                    onDismiss = { shieldStatsSheetVisibleState = false },
+                    onDataSaverToggled = { isChecked ->
+                        dataSaverEnabledState = isChecked
+                        onDataSaverToggled?.invoke(isChecked)
                     }
                 )
                 KaraokeLyricsBottomSheet(
@@ -270,8 +278,8 @@ class PlayerViewController(private val rootView: View) {
         var isDockExpanded by remember { mutableStateOf(true) }
         var isHandleFocused by remember { mutableStateOf(false) }
         val hasActiveMenuSettings = audioFxState.isAnyEffectActive ||
-            sleepTimerRemainingMsState > 0L ||
-            dataSaverEnabledState
+            sleepTimerRemainingMsState > 0L
+        val hasAnyActiveSetting = hasActiveMenuSettings || dataSaverEnabledState
 
         Surface(
             modifier = Modifier.fillMaxWidth(),
@@ -346,7 +354,7 @@ class PlayerViewController(private val rootView: View) {
                                     fontSize = 11.5.sp,
                                     fontWeight = FontWeight.Medium
                                 )
-                                if (hasActiveMenuSettings) {
+                                if (hasAnyActiveSetting) {
                                     Box(
                                         modifier = Modifier
                                             .size(5.dp)
@@ -388,7 +396,7 @@ class PlayerViewController(private val rootView: View) {
                             var isSkipBannerFocused by remember { mutableStateOf(false) }
 
                             Surface(
-                                onClick = { controlMenuSheetVisibleState = true },
+                                onClick = { shieldStatsSheetVisibleState = true },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 2.dp)
@@ -705,7 +713,7 @@ class PlayerViewController(private val rootView: View) {
                                 var isStatusFocused by remember { mutableStateOf(false) }
 
                                 Surface(
-                                    onClick = { controlMenuSheetVisibleState = true },
+                                    onClick = { shieldStatsSheetVisibleState = true },
                                     color = Color.Transparent,
                                     shape = RoundedCornerShape(8.dp),
                                     border = if (isStatusFocused) {
@@ -718,7 +726,7 @@ class PlayerViewController(private val rootView: View) {
                                         .heightIn(min = 28.dp)
                                         .onFocusChanged { isStatusFocused = it.hasFocus }
                                         .semantics(mergeDescendants = true) {
-                                            contentDescription = "$statsPrefix, ketuk untuk statistik YTM Shield dan pengaturan"
+                                            contentDescription = "$statsPrefix, ketuk untuk membuka YTM Shield dan Mode Audio Saja"
                                         }
                                 ) {
                                     Row(
@@ -1061,6 +1069,10 @@ class PlayerViewController(private val rootView: View) {
 
     fun hideControlMenuSheet() {
         controlMenuSheetVisibleState = false
+    }
+
+    fun hideShieldStatsSheet() {
+        shieldStatsSheetVisibleState = false
     }
 
     fun setLyricsUiState(state: LyricsUiState) {

@@ -1030,6 +1030,10 @@ class AppCoordinator(private val activity: AppCompatActivity) {
             viewController.hideAudioFxSheet()
             return true
         }
+        if (viewController.isShieldStatsSheetVisible) {
+            viewController.hideShieldStatsSheet()
+            return true
+        }
         if (viewController.isControlMenuSheetVisible) {
             viewController.hideControlMenuSheet()
             return true

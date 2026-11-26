@@ -26,8 +26,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -53,7 +51,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -66,9 +63,8 @@ import com.bagas39.ytmusic2.util.FormatUtils
 import kotlinx.coroutines.delay
 
 /**
- * Hub menu dan pengaturan terpusat (Audio FX Studio, Sleep Timer, Mode Audio Saja,
- * Kualitas Audio, serta Statistik YTM Shield) agar kontrol lanjutan mudah ditemukan
- * tanpa memenuhi baris dock utama.
+ * Hub menu kontrol audio terpusat (Audio FX Studio, Sleep Timer, dan Kualitas Audio)
+ * agar pengaturan pemutaran mudah diakses tanpa memenuhi baris dock utama.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -76,15 +72,10 @@ fun ControlMenuSheet(
     visible: Boolean,
     audioFxState: AudioFxState,
     sleepTimerRemainingMs: Long,
-    dataSaverEnabled: Boolean,
     audioQuality: AudioQuality,
-    totalAdsSkipped: Int,
-    totalSecondsSaved: Int,
-    formattedSavedTime: String,
     onDismiss: () -> Unit,
     onOpenAudioFx: () -> Unit,
     onOpenSleepTimer: () -> Unit,
-    onDataSaverToggled: (Boolean) -> Unit,
     onAudioQualitySelected: (AudioQuality) -> Unit
 ) {
     var isRendered by remember { mutableStateOf(visible) }
@@ -116,8 +107,6 @@ fun ControlMenuSheet(
 
     if (!visible && !isRendered) return
 
-    // Estimasi rata-rata bitrate stream video iklan 480p (~165 KB/detik)
-    val dataSavedMb = String.format("%.1f MB", totalSecondsSaved * 0.165f)
     val fxSummary = buildList {
         add(audioFxState.speedPreset.displayName)
         if (audioFxState.clampedBassBoost > 0) add("Bass ${audioFxState.clampedBassBoost / 10}%")
@@ -144,7 +133,7 @@ fun ControlMenuSheet(
                 contentAlignment = Alignment.Center
             ) {
                 Surface(
-                    color = YtmPalette.ActiveBorder,
+                    color = YtmPalette.ControlBorder,
                     shape = RoundedCornerShape(2.dp),
                     modifier = Modifier.size(width = 36.dp, height = 4.dp)
                 ) {}
@@ -188,7 +177,7 @@ fun ControlMenuSheet(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Audio FX, kualitas suara, hemat kuota, dan statistik",
+                            text = "Audio FX, sleep timer, dan kualitas audio",
                             color = YtmPalette.TextMuted,
                             fontSize = 12.sp,
                             maxLines = 1,
@@ -221,7 +210,7 @@ fun ControlMenuSheet(
 
                 HorizontalDivider(
                     thickness = 1.dp,
-                    color = YtmPalette.CrimsonHairline.copy(alpha = 0.55f)
+                    color = YtmPalette.SubtleDivider
                 )
 
                 Column(
@@ -257,162 +246,7 @@ fun ControlMenuSheet(
                     Surface(
                         shape = RoundedCornerShape(14.dp),
                         color = YtmPalette.HeaderSurface,
-                        border = BorderStroke(1.dp, YtmPalette.ControlBorder),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            var isSaverFocused by remember { mutableStateOf(false) }
-                            Surface(
-                                onClick = { onDataSaverToggled(!dataSaverEnabled) },
-                                color = Color.Transparent,
-                                shape = RoundedCornerShape(10.dp),
-                                border = if (isSaverFocused) BorderStroke(1.5.dp, YtmPalette.FocusRing) else null,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(min = 48.dp)
-                                    .onFocusChanged { isSaverFocused = it.hasFocus }
-                                    .semantics(mergeDescendants = true) {
-                                        selected = dataSaverEnabled
-                                        contentDescription = if (dataSaverEnabled) {
-                                            "Mode Audio Saja aktif, ketuk untuk mematikan"
-                                        } else {
-                                            "Mode Audio Saja nonaktif, ketuk untuk mengaktifkan"
-                                        }
-                                    }
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 2.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                                        Text(
-                                            text = "Mode Audio Saja",
-                                            color = YtmPalette.TextPrimary,
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                        Text(
-                                            text = "Kunci video ke 144p untuk menghemat kuota tanpa menurunkan kualitas audio",
-                                            color = YtmPalette.TextMuted,
-                                            fontSize = 12.sp,
-                                            lineHeight = 16.sp
-                                        )
-                                    }
-                                    Switch(
-                                        checked = dataSaverEnabled,
-                                        onCheckedChange = onDataSaverToggled,
-                                        colors = SwitchDefaults.colors(
-                                            checkedThumbColor = Color.White,
-                                            checkedTrackColor = YtmPalette.CrimsonPrimary,
-                                            uncheckedThumbColor = YtmPalette.TextSecondary,
-                                            uncheckedTrackColor = YtmPalette.ControlSurface,
-                                            uncheckedBorderColor = YtmPalette.ControlBorder
-                                        )
-                                    )
-                                }
-                            }
-
-                            HorizontalDivider(thickness = 1.dp, color = YtmPalette.SubtleDivider)
-
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Column {
-                                    Text(
-                                        text = "Kualitas Audio",
-                                        color = YtmPalette.TextPrimary,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    Text(
-                                        text = "Berlaku untuk streaming online dan unduhan offline",
-                                        color = YtmPalette.TextMuted,
-                                        fontSize = 12.sp
-                                    )
-                                }
-
-                                Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    AudioQuality.entries.chunked(2).forEach { pair ->
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            pair.forEach { quality ->
-                                                val isSelected = audioQuality == quality
-                                                var isChipFocused by remember { mutableStateOf(false) }
-                                                val chipBorder = when {
-                                                    isChipFocused -> YtmPalette.FocusRing
-                                                    isSelected -> YtmPalette.ActiveBorder
-                                                    else -> YtmPalette.ControlBorder
-                                                }
-                                                Surface(
-                                                    onClick = { onAudioQualitySelected(quality) },
-                                                    shape = RoundedCornerShape(10.dp),
-                                                    color = if (isSelected) {
-                                                        YtmPalette.CrimsonPrimary
-                                                    } else {
-                                                        YtmPalette.ControlSurface
-                                                    },
-                                                    border = BorderStroke(
-                                                        width = if (isChipFocused) 1.5.dp else 1.dp,
-                                                        color = chipBorder
-                                                    ),
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .heightIn(min = 52.dp)
-                                                        .onFocusChanged { isChipFocused = it.hasFocus }
-                                                        .semantics(mergeDescendants = true) {
-                                                            selected = isSelected
-                                                            contentDescription = "${quality.displayName}, ${quality.bitrateLabel}"
-                                                        }
-                                                ) {
-                                                    Column(
-                                                        modifier = Modifier.padding(vertical = 8.dp, horizontal = 8.dp),
-                                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                                        verticalArrangement = Arrangement.Center
-                                                    ) {
-                                                        Text(
-                                                            text = quality.displayName,
-                                                            color = if (isSelected) Color.White else YtmPalette.TextPrimary,
-                                                            fontSize = 12.5.sp,
-                                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                        Text(
-                                                            text = quality.bitrateLabel,
-                                                            color = if (isSelected) {
-                                                                YtmPalette.CrimsonSubtext
-                                                            } else {
-                                                                YtmPalette.TextMutedOnControl
-                                                            },
-                                                            fontSize = 10.5.sp,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = YtmPalette.HeaderSurface,
-                        border = BorderStroke(1.dp, YtmPalette.ControlBorder),
+                        border = BorderStroke(1.dp, YtmPalette.DockBorder),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(
@@ -421,17 +255,88 @@ fun ControlMenuSheet(
                                 .padding(horizontal = 14.dp, vertical = 12.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text(
-                                text = "Statistik YTM Shield",
-                                color = YtmPalette.TextPrimary,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            MenuStatRow("Iklan dilewati", "$totalAdsSkipped")
-                            HorizontalDivider(thickness = 0.5.dp, color = YtmPalette.SubtleDivider)
-                            MenuStatRow("Waktu dihemat", formattedSavedTime)
-                            HorizontalDivider(thickness = 0.5.dp, color = YtmPalette.SubtleDivider)
-                            MenuStatRow("Estimasi kuota iklan (480p)", dataSavedMb)
+                            Column {
+                                Text(
+                                    text = "Kualitas Audio",
+                                    color = YtmPalette.TextPrimary,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "Berlaku untuk streaming online dan unduhan offline",
+                                    color = YtmPalette.TextMuted,
+                                    fontSize = 12.sp
+                                )
+                            }
+
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                AudioQuality.entries.chunked(2).forEach { pair ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        pair.forEach { quality ->
+                                            val isSelected = audioQuality == quality
+                                            var isChipFocused by remember { mutableStateOf(false) }
+                                            val chipBorder = when {
+                                                isChipFocused -> YtmPalette.FocusRing
+                                                isSelected -> YtmPalette.ActiveBorder
+                                                else -> YtmPalette.DockBorder
+                                            }
+                                            Surface(
+                                                onClick = { onAudioQualitySelected(quality) },
+                                                shape = RoundedCornerShape(10.dp),
+                                                color = if (isSelected) {
+                                                    YtmPalette.CrimsonPrimary
+                                                } else {
+                                                    YtmPalette.ControlSurface
+                                                },
+                                                border = BorderStroke(
+                                                    width = if (isChipFocused) 1.5.dp else 1.dp,
+                                                    color = chipBorder
+                                                ),
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .heightIn(min = 52.dp)
+                                                    .onFocusChanged { isChipFocused = it.hasFocus }
+                                                    .semantics(mergeDescendants = true) {
+                                                        selected = isSelected
+                                                        contentDescription = "${quality.displayName}, ${quality.bitrateLabel}"
+                                                    }
+                                            ) {
+                                                Column(
+                                                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 8.dp),
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    verticalArrangement = Arrangement.Center
+                                                ) {
+                                                    Text(
+                                                        text = quality.displayName,
+                                                        color = if (isSelected) Color.White else YtmPalette.TextPrimary,
+                                                        fontSize = 12.5.sp,
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    Text(
+                                                        text = quality.bitrateLabel,
+                                                        color = if (isSelected) {
+                                                            YtmPalette.CrimsonSubtext
+                                                        } else {
+                                                            YtmPalette.TextMutedOnControl
+                                                        },
+                                                        fontSize = 10.5.sp,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -452,7 +357,7 @@ private fun MenuActionTile(
     val borderColor = when {
         isFocused -> YtmPalette.FocusRing
         isHighlighted -> YtmPalette.ActiveBorder
-        else -> YtmPalette.ControlBorder
+        else -> YtmPalette.DockBorder
     }
 
     Surface(
@@ -495,24 +400,6 @@ private fun MenuActionTile(
                 color = if (isHighlighted) YtmPalette.ActiveBorder else YtmPalette.TextSecondary
             )
         }
-    }
-}
-
-@Composable
-private fun MenuStatRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(text = label, color = YtmPalette.TextMuted, fontSize = 12.5.sp)
-        Text(
-            text = value,
-            color = YtmPalette.TextPrimary,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            fontFamily = FontFamily.Monospace
-        )
     }
 }
 
