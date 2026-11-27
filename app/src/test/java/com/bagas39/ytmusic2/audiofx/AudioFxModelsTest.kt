@@ -26,11 +26,15 @@ class AudioFxModelsTest {
         val nightcore = AudioFxState(
             speedPreset = SpeedPreset.NIGHTCORE,
             customSpeed = SpeedPreset.NIGHTCORE.speed,
-            customPitch = SpeedPreset.NIGHTCORE.pitch
+            customPitch = SpeedPreset.NIGHTCORE.pitch,
+            bassBoostStrength = SpeedPreset.NIGHTCORE.suggestedBassBoost
         )
-        assertEquals(1.15f, nightcore.effectiveSpeed, 0.001f)
-        assertEquals(1.15f, nightcore.effectivePitch, 0.001f)
+        assertEquals(1.12f, nightcore.effectiveSpeed, 0.001f)
+        assertEquals(1.12f, nightcore.effectivePitch, 0.001f)
+        assertEquals(200, nightcore.clampedBassBoost)
         assertTrue(nightcore.isPlaybackModified)
+        assertTrue(nightcore.isDspActive)
+        assertTrue(nightcore.needsNightcoreSmoothing)
         assertFalse(nightcore.preservesPitchInWeb)
 
         val slowed = AudioFxState(
@@ -43,7 +47,30 @@ class AudioFxModelsTest {
         assertEquals(0.85f, slowed.effectivePitch, 0.001f)
         assertEquals(350, slowed.clampedBassBoost)
         assertTrue(slowed.isDspActive)
+        assertFalse(slowed.needsNightcoreSmoothing)
         assertFalse(slowed.preservesPitchInWeb)
+    }
+
+    @Test
+    fun nightcoreAppliesAntiHarshnessToneCompensationWithoutAlteringUserEq() {
+        val flatNightcore = AudioFxState(
+            speedPreset = SpeedPreset.NIGHTCORE,
+            customSpeed = SpeedPreset.NIGHTCORE.speed,
+            customPitch = SpeedPreset.NIGHTCORE.pitch,
+            bassBoostStrength = SpeedPreset.NIGHTCORE.suggestedBassBoost
+        )
+        assertEquals(listOf(0f, 0f, 0f, 0f, 0f), flatNightcore.effectiveBandGainsDb)
+        assertTrue(flatNightcore.effectiveDspBandGainsDb[0] > 0f)
+        assertTrue(flatNightcore.effectiveDspBandGainsDb[1] > 0f)
+        assertTrue(flatNightcore.effectiveDspBandGainsDb[3] < 0f)
+        assertTrue(flatNightcore.effectiveDspBandGainsDb[4] < 0f)
+
+        val stackedNightcore = flatNightcore.copy(
+            equalizerPreset = EqualizerPreset.CUSTOM,
+            customBandGainsDb = listOf(11f, 0f, 0f, -11f, 0f)
+        )
+        assertEquals(AudioFxState.MAX_EQ_DB, stackedNightcore.effectiveDspBandGainsDb[0], 0.001f)
+        assertEquals(AudioFxState.MIN_EQ_DB, stackedNightcore.effectiveDspBandGainsDb[3], 0.001f)
     }
 
     @Test

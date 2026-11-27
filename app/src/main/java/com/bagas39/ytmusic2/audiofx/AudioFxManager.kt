@@ -34,14 +34,13 @@ class AudioFxManager(
     private var loudnessEnhancer: LoudnessEnhancer? = null
 
     fun applySpeedPreset(preset: SpeedPreset) {
-        val nextBass = when (preset) {
-            SpeedPreset.SLOWED -> maxOf(state.clampedBassBoost, preset.suggestedBassBoost)
-            SpeedPreset.NORMAL -> if (state.speedPreset == SpeedPreset.SLOWED && state.clampedBassBoost == SpeedPreset.SLOWED.suggestedBassBoost) {
-                0
-            } else {
-                state.clampedBassBoost
+        val usingSuggestedBass = state.clampedBassBoost == state.speedPreset.suggestedBassBoost
+        val nextBass = when {
+            usingSuggestedBass -> preset.suggestedBassBoost
+            preset == SpeedPreset.SLOWED || preset == SpeedPreset.NIGHTCORE -> {
+                maxOf(state.clampedBassBoost, preset.suggestedBassBoost)
             }
-            SpeedPreset.NIGHTCORE -> state.clampedBassBoost
+            else -> state.clampedBassBoost
         }
         updateState(
             state.copy(
@@ -226,7 +225,7 @@ class AudioFxManager(
     private fun applyNativeEqualizer() {
         val eq = equalizer ?: return
         try {
-            val gainsDb = state.effectiveBandGainsDb
+            val gainsDb = state.effectiveDspBandGainsDb
             val hasNonZero = gainsDb.any { kotlin.math.abs(it) > 0.05f }
             val range = eq.bandLevelRange
             val minMb = range.getOrNull(0)?.toInt() ?: -1500
@@ -279,13 +278,14 @@ class AudioFxManager(
 
     private fun applyToWebView() {
         val current = state
-        val gains = current.effectiveBandGainsDb
+        val gains = current.effectiveDspBandGainsDb
         val gainsJsArray = gains.joinToString(",") { String.format(Locale.US, "%.2f", it) }
         val speedStr = String.format(Locale.US, "%.3f", current.effectiveSpeed)
         val bassDbStr = String.format(Locale.US, "%.2f", current.bassBoostDbForWeb())
         val preservesPitchLit = if (current.preservesPitchInWeb) "true" else "false"
         val normalizerLit = if (current.volumeNormalizerEnabled) "true" else "false"
         val dspActiveLit = if (current.isDspActive) "true" else "false"
+        val nightcoreSmoothLit = if (current.needsNightcoreSmoothing) "true" else "false"
 
         val script = """
             (function() {
@@ -295,17 +295,25 @@ class AudioFxManager(
                     bassDb: $bassDbStr,
                     eqGains: [$gainsJsArray],
                     normalizer: $normalizerLit,
-                    dspActive: $dspActiveLit
+                    dspActive: $dspActiveLit,
+                    nightcoreSmooth: $nightcoreSmoothLit
                 };
 
                 function applyVideoRate(v) {
-                    if (!v) return;
+                    var adActive = !!(window._ytmAdSkipping && (Date.now() - (window._ytmAdSkipTs || 0) < 4000));
+                    if (!v || adActive) return;
                     var fx = window._ytmAudioFx;
                     if (!fx) return;
                     try {
-                        if ('preservesPitch' in v) v.preservesPitch = fx.preservesPitch;
-                        if ('webkitPreservesPitch' in v) v.webkitPreservesPitch = fx.preservesPitch;
-                        if ('mozPreservesPitch' in v) v.mozPreservesPitch = fx.preservesPitch;
+                        if ('preservesPitch' in v && v.preservesPitch !== fx.preservesPitch) {
+                            v.preservesPitch = fx.preservesPitch;
+                        }
+                        if ('webkitPreservesPitch' in v && v.webkitPreservesPitch !== fx.preservesPitch) {
+                            v.webkitPreservesPitch = fx.preservesPitch;
+                        }
+                        if ('mozPreservesPitch' in v && v.mozPreservesPitch !== fx.preservesPitch) {
+                            v.mozPreservesPitch = fx.preservesPitch;
+                        }
                         if (Math.abs((v.playbackRate || 1) - fx.speed) > 0.005) {
                             v.playbackRate = fx.speed;
                         }
@@ -348,6 +356,18 @@ class AudioFxManager(
                             return f;
                         });
 
+                        // Filter anti-harshness dan de-essing halus untuk mode Nightcore
+                        var deHarsh = ctx.createBiquadFilter();
+                        deHarsh.type = 'peaking';
+                        deHarsh.frequency.value = 3200;
+                        deHarsh.Q.value = 1.1;
+                        deHarsh.gain.value = 0;
+
+                        var deEssLp = ctx.createBiquadFilter();
+                        deEssLp.type = 'lowpass';
+                        deEssLp.frequency.value = 22000;
+                        deEssLp.Q.value = 0.5;
+
                         var comp = ctx.createDynamicsCompressor();
                         var makeupGain = ctx.createGain();
                         makeupGain.gain.value = 1.0;
@@ -359,7 +379,9 @@ class AudioFxManager(
                             tail.connect(eqNodes[i]);
                             tail = eqNodes[i];
                         }
-                        tail.connect(comp);
+                        tail.connect(deHarsh);
+                        deHarsh.connect(deEssLp);
+                        deEssLp.connect(comp);
                         comp.connect(makeupGain);
                         makeupGain.connect(ctx.destination);
 
@@ -367,6 +389,8 @@ class AudioFxManager(
                             ctx: ctx,
                             bass: bass,
                             eqNodes: eqNodes,
+                            deHarsh: deHarsh,
+                            deEssLp: deEssLp,
                             comp: comp,
                             makeupGain: makeupGain
                         };
@@ -385,8 +409,9 @@ class AudioFxManager(
                     if (!nodes) return;
                     try {
                         var ctx = nodes.ctx;
-                        if (ctx.state === 'suspended' && !v.paused) {
-                            ctx.resume();
+                        if (ctx.state !== 'running' && !v.paused) {
+                            var res = ctx.resume();
+                            if (res && typeof res.catch === 'function') res.catch(function() {});
                         }
                         var now = ctx.currentTime;
                         nodes.bass.gain.setTargetAtTime(fx.bassDb || 0, now, 0.03);
@@ -394,15 +419,29 @@ class AudioFxManager(
                             var g = (fx.eqGains && typeof fx.eqGains[i] === 'number') ? fx.eqGains[i] : 0;
                             nodes.eqNodes[i].gain.setTargetAtTime(g, now, 0.03);
                         }
+                        if (nodes.deHarsh) {
+                            nodes.deHarsh.gain.setTargetAtTime(fx.nightcoreSmooth ? -1.2 : 0, now, 0.03);
+                        }
+                        if (nodes.deEssLp) {
+                            nodes.deEssLp.frequency.setTargetAtTime(fx.nightcoreSmooth ? 16000 : 22000, now, 0.03);
+                        }
                         if (fx.normalizer) {
                             nodes.comp.threshold.setTargetAtTime(-24, now, 0.03);
                             nodes.comp.knee.setTargetAtTime(18, now, 0.03);
                             nodes.comp.ratio.setTargetAtTime(6, now, 0.03);
                             nodes.comp.attack.setTargetAtTime(0.005, now, 0.03);
                             nodes.comp.release.setTargetAtTime(0.2, now, 0.03);
-                            nodes.makeupGain.gain.setTargetAtTime(1.18, now, 0.03);
+                            nodes.makeupGain.gain.setTargetAtTime(fx.nightcoreSmooth ? 1.08 : 1.18, now, 0.03);
+                        } else if (fx.dspActive) {
+                            nodes.comp.threshold.setTargetAtTime(-2, now, 0.03);
+                            nodes.comp.knee.setTargetAtTime(6, now, 0.03);
+                            nodes.comp.ratio.setTargetAtTime(12, now, 0.03);
+                            nodes.comp.attack.setTargetAtTime(0.003, now, 0.03);
+                            nodes.comp.release.setTargetAtTime(0.15, now, 0.03);
+                            nodes.makeupGain.gain.setTargetAtTime(fx.nightcoreSmooth ? 0.94 : 1.0, now, 0.03);
                         } else {
                             nodes.comp.threshold.setTargetAtTime(0, now, 0.03);
+                            nodes.comp.knee.setTargetAtTime(0, now, 0.03);
                             nodes.comp.ratio.setTargetAtTime(1, now, 0.03);
                             nodes.makeupGain.gain.setTargetAtTime(1.0, now, 0.03);
                         }

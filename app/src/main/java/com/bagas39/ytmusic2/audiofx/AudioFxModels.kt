@@ -8,10 +8,18 @@ enum class SpeedPreset(
     val speed: Float,
     val pitch: Float,
     val suggestedBassBoost: Int,
-    val preservesPitchInWeb: Boolean
+    val preservesPitchInWeb: Boolean,
+    val toneCompensationDb: List<Float> = listOf(0f, 0f, 0f, 0f, 0f)
 ) {
     NORMAL("Normal (1.0x)", 1.0f, 1.0f, 0, true),
-    NIGHTCORE("Nightcore (1.15x)", 1.15f, 1.15f, 0, false),
+    NIGHTCORE(
+        displayName = "Nightcore (1.12x)",
+        speed = 1.12f,
+        pitch = 1.12f,
+        suggestedBassBoost = 200,
+        preservesPitchInWeb = false,
+        toneCompensationDb = listOf(2.0f, 1.0f, 0f, -2.0f, -1.5f)
+    ),
     SLOWED("Slowed / Chill (0.85x)", 0.85f, 0.85f, 350, false);
 
     companion object {
@@ -71,10 +79,33 @@ data class AudioFxState(
             }
         }
 
+    val needsNightcoreSmoothing: Boolean
+        get() = speedPreset == SpeedPreset.NIGHTCORE || effectivePitch > 1.04f
+
+    val activeToneCompensationDb: List<Float>
+        get() = when {
+            speedPreset == SpeedPreset.NIGHTCORE -> SpeedPreset.NIGHTCORE.toneCompensationDb
+            effectivePitch > 1.04f -> {
+                val scale = ((effectivePitch - 1.0f) / 0.12f).coerceIn(0f, 1.25f)
+                SpeedPreset.NIGHTCORE.toneCompensationDb.map { it * scale }
+            }
+            else -> speedPreset.toneCompensationDb
+        }
+
+    val effectiveDspBandGainsDb: List<Float>
+        get() {
+            val base = effectiveBandGainsDb
+            val comp = activeToneCompensationDb
+            return List(BAND_COUNT) { idx ->
+                ((base.getOrNull(idx) ?: 0f) + (comp.getOrNull(idx) ?: 0f)).coerceIn(MIN_EQ_DB, MAX_EQ_DB)
+            }
+        }
+
     val isDspActive: Boolean
         get() = clampedBassBoost > 0 ||
             volumeNormalizerEnabled ||
-            effectiveBandGainsDb.any { abs(it) > 0.05f }
+            needsNightcoreSmoothing ||
+            effectiveDspBandGainsDb.any { abs(it) > 0.05f }
 
     val isPlaybackModified: Boolean
         get() = abs(effectiveSpeed - 1.0f) > 0.01f || abs(effectivePitch - 1.0f) > 0.01f

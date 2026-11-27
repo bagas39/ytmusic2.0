@@ -349,7 +349,7 @@ private fun SpeedPresetSection(
                 }
                 val subtitle = when (preset) {
                     SpeedPreset.NORMAL -> "1.0x"
-                    SpeedPreset.NIGHTCORE -> "1.15x · Pitch +"
+                    SpeedPreset.NIGHTCORE -> "1.12x · Pitch +"
                     SpeedPreset.SLOWED -> "0.85x · Bass"
                 }
                 val borderColor = when {

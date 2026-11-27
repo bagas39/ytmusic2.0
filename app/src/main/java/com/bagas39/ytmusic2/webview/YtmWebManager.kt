@@ -649,6 +649,8 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                             domAd: true, dur: domDur
                         });
                     }
+                    window._ytmAdSkipping = true;
+                    window._ytmAdSkipTs = Date.now();
                     v.muted = true;
                     v.playbackRate = 16.0;
                     if (isFinite(v.duration) && v.duration > 0) {
@@ -678,9 +680,19 @@ class YtmWebManager(private val webView: KeepAliveWebView) {
                         cancelAnimationFrame(_fastSkipRaf);
                         _fastSkipRaf = null;
                     }
-                    if (v && v.playbackRate > 1.0) {
-                        v.playbackRate = 1.0;
+                    if (v && (window._ytmAdSkipping || v.playbackRate > 2.5)) {
+                        window._ytmAdSkipping = false;
+                        window._ytmAdSkipTs = 0;
                         v.muted = false;
+                        if (typeof window._ytmSyncAudioFx === 'function') {
+                            window._ytmSyncAudioFx();
+                        }
+                        var targetRate = (window._ytmAudioFx && typeof window._ytmAudioFx.speed === 'number')
+                            ? window._ytmAudioFx.speed
+                            : 1.0;
+                        if (Math.abs((v.playbackRate || 1) - targetRate) > 0.005) {
+                            v.playbackRate = targetRate;
+                        }
                     }
                 }
             }
